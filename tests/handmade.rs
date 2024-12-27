@@ -144,12 +144,12 @@ fn push_to_static() {
 
 #[test]
 fn pop_keep_capacity() {
-    let mut inline = LeanString::from("Hello World!");
+    let mut inline = LeanString::from("Hello!");
     assert_eq!(inline.pop(), Some('!'));
-    assert_eq!(inline, "Hello World");
-    assert_eq!(inline.len(), 11);
+    assert_eq!(inline, "Hello");
+    assert_eq!(inline.len(), 5);
 
-    for _ in 0..10 {
+    for _ in 0..4 {
         inline.pop();
     }
     assert_eq!(inline, "H");
@@ -370,11 +370,11 @@ fn convert_static_to_inline_with_reserve() {
     let s: &'static str = "1234567890ABCDEFGHIJ";
     let mut static_ = LeanString::from_static_str(s);
 
-    for _ in 0..10 {
+    for _ in 0..14 {
         static_.pop();
     }
 
-    assert_eq!(static_, "1234567890");
+    assert_eq!(static_, "123456");
     assert_eq!(static_.capacity(), static_.len()); // still in static buffer
 
     static_.reserve(1);
