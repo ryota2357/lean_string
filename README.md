@@ -24,8 +24,6 @@ Compact, clone-on-write string.
 - High API compatibility for `String`.
 - Supports `no_std` environment.
 
-⚠️Currently, `LeanString` only supports 64-bit architecture. I'm working on supporting 32-bit architecture.
-
 ## Example
 
 ```rust
@@ -56,7 +54,20 @@ assert_eq!(large, cloned + "!");
 | [`EcoString`](https://docs.rs/ecow/latest/ecow/string/struct.EcoString.html)                | 16 bytes | 15 bytes | No             | Clone-on-Write, Nich optimized for `Option<_>` |
 | `LeanString` (This crate)                                                                   | 16 bytes | 16 bytes | Yes            | Clone-on-Write, Nich optimized for `Option<_>` |
 
-- **Size**: The size of the struct for 64-bit architecture.
+<details>
+<summary>Above table is for 64-bit architecture. Click here for 32-bit architecture.</summary>
+
+| Name                      | Size     | Inline   | `&'static str` | Notes                                          |
+| ------------------------- | -------- | -------- | -------------- | ---------------------------------------------- |
+| `String`                  | 12 bytes | No       | No             | prelude                                        |
+| `Cow<'static, str>`       | 12 bytes | No       | Yes            | std (alloc)                                    |
+| `CompactString`           | 12 bytes | 12 bytes | Yes            | Nich optimized for `Option<_>`                 |
+| `EcoString`               | 8 bytes  | 7 bytes  | No             | Clone-on-Write, Nich optimized for `Option<_>` |
+| `LeanString` (This crate) | 8 bytes  | 8 bytes  | Yes            | Clone-on-Write, Nich optimized for `Option<_>` |
+
+</details>
+
+- **Size**: The size of the struct.
 - **Inline**: The maximum size of the string that can be stored inlined (on the stack).
 - **`&'static str`**: Zero-allocation and O(1) construction from `&'static str`.
 
