@@ -136,9 +136,20 @@ macro_rules! impl_NumToRepr_for_integers {
     )*};
 }
 
-#[cfg(target_pointer_width = "64")]
+#[cfg(any(target_pointer_width = "64", target_arch = "wasm32"))]
 impl_NumToRepr_for_integers!(
-    i8, u8, i16, u16, i32, u32, i64, u64, isize, usize;
+    i8, u8, i16, u16, i32, u32, isize, usize;
+    as u64
+);
+
+#[cfg(not(any(target_pointer_width = "64", target_arch = "wasm32")))]
+impl_NumToRepr_for_integers!(
+    i8, u8, i16, u16, i32, u32, isize, usize;
+    as u32
+);
+
+impl_NumToRepr_for_integers!(
+    i64, u64;
     as u64
 );
 
@@ -350,14 +361,32 @@ impl DigitCount for i64 {
 
 #[cfg(target_pointer_width = "64")]
 impl DigitCount for usize {
+    #[inline(always)]
     fn digit_count(self) -> usize {
         DigitCount::digit_count(self as u64)
     }
 }
 
+#[cfg(target_pointer_width = "32")]
+impl DigitCount for usize {
+    #[inline(always)]
+    fn digit_count(self) -> usize {
+        DigitCount::digit_count(self as u32)
+    }
+}
+
 #[cfg(target_pointer_width = "64")]
 impl DigitCount for isize {
+    #[inline(always)]
     fn digit_count(self) -> usize {
         DigitCount::digit_count(self as i64)
+    }
+}
+
+#[cfg(target_pointer_width = "32")]
+impl DigitCount for isize {
+    #[inline(always)]
+    fn digit_count(self) -> usize {
+        DigitCount::digit_count(self as i32)
     }
 }

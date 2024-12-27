@@ -7,7 +7,7 @@ use core::sync::atomic::AtomicUsize;
 #[cfg(loom)]
 use loom::sync::atomic::AtomicUsize;
 
-use internal::TextSize;
+use internal::*;
 
 /// [`HeapBuffer`] grows at an amortized rates of 1.5x
 #[inline(always)]
@@ -19,16 +19,19 @@ pub(crate) fn amortized_growth(cur_len: usize, additional: usize) -> usize {
 
 #[repr(C)]
 pub(super) struct HeapBuffer {
+    // 64-bit architecture or 32-bit architecture if `is_len_heap_layout` is false:
     // | Header | Data (array of `u8`) |
     //          ^ ptr
+    // 32-bit architecture if `is_len_heap_layout` is true:
+    // | Length | Header | Data (array of `u8`) |
+    //                   ^ ptr
     ptr: NonNull<u8>,
-    len: TextSize,
+    len: TextLen,
 }
 
-#[cfg(target_pointer_width = "64")]
 struct Header {
     count: AtomicUsize,
-    capacity: usize,
+    capacity: Capacity,
 }
 
 fn _static_assert() {
@@ -39,12 +42,20 @@ fn _static_assert() {
 }
 
 impl HeapBuffer {
-    #[cfg(target_pointer_width = "64")]
     pub(super) fn new(text: &str) -> Result<Self, ReserveError> {
         let text_len = text.len();
 
-        let len = TextSize::new(text_len)?;
-        let ptr = HeapBuffer::allocate_ptr(text_len)?;
+        let len = TextLen::new(text_len)?;
+        let ptr = HeapBuffer::allocate_ptr(Capacity::new(text_len)?)?;
+
+        if len.is_heap() {
+            // SAFETY: Since we passed `text_len` as the capacity and `len` equals to `text_len`,
+            // `ptr` is allocated with enough space to store the length.
+            unsafe {
+                let len_ptr = ptr.sub(HeapBuffer::header_offset()).sub(size_of::<usize>());
+                ptr::write(len_ptr.as_ptr().cast(), text_len);
+            }
+        }
 
         // SAFETY:
         // - src (`text`) and dst (`ptr`) is valid for `text_len` bytes because `text_len` comes
@@ -56,21 +67,30 @@ impl HeapBuffer {
         Ok(HeapBuffer { ptr, len })
     }
 
-    #[cfg(target_pointer_width = "64")]
     pub(crate) fn with_capacity(capacity: usize) -> Result<Self, ReserveError> {
-        let len = TextSize::new(0)?;
-        let ptr = HeapBuffer::allocate_ptr(capacity)?;
+        let len = TextLen::new(0)?;
+        let cap = Capacity::new(capacity)?;
+        let ptr = HeapBuffer::allocate_ptr(cap)?;
         Ok(HeapBuffer { ptr, len })
     }
 
     pub(super) fn with_additional(text: &str, additional: usize) -> Result<Self, ReserveError> {
         let text_len = text.len();
 
-        let len = TextSize::new(text_len)?;
+        let len = TextLen::new(text_len)?;
         let ptr = {
-            let new_capacity = amortized_growth(text_len, additional);
+            let new_capacity = Capacity::new(amortized_growth(text_len, additional))?;
             HeapBuffer::allocate_ptr(new_capacity)?
         };
+
+        if len.is_heap() {
+            // SAFETY: Since the `new_capacity` is greater than or equal to `text_len`, `ptr` is
+            // allocated with enough space to store the length.
+            unsafe {
+                let len_ptr = ptr.sub(HeapBuffer::header_offset()).sub(size_of::<usize>());
+                ptr::write(len_ptr.as_ptr().cast(), text_len);
+            }
+        }
 
         // SAFETY:
         // - src (`text`) and dst (`ptr`) is valid for `text_len` bytes because `text_len` comes
@@ -84,15 +104,27 @@ impl HeapBuffer {
     }
 
     pub(super) fn capacity(&self) -> usize {
-        self.header().capacity
+        self.header().capacity.as_usize()
     }
 
     pub(super) fn len(&self) -> usize {
-        self.len.as_usize()
+        #[cold]
+        fn len_on_heap(ptr: NonNull<u8>) -> usize {
+            // SAFETY: We just checked that `len` is stored on the heap.
+            unsafe {
+                let len_ptr = ptr.sub(HeapBuffer::header_offset()).sub(size_of::<usize>());
+                ptr::read(len_ptr.as_ptr().cast())
+            }
+        }
+        if self.len.is_heap() {
+            len_on_heap(self.ptr)
+        } else {
+            self.len.as_usize()
+        }
     }
 
     pub(super) fn as_str(&self) -> &str {
-        let len = self.len.as_usize();
+        let len = self.len();
         let ptr = self.ptr.as_ptr();
         // SAFETY: HeapBuffer contains valid `len` bytes of UTF-8 string.
         unsafe { core::str::from_utf8_unchecked(slice::from_raw_parts(ptr, len)) }
@@ -105,7 +137,10 @@ impl HeapBuffer {
         debug_assert!(self.is_unique());
         debug_assert!(self.len.as_usize() <= new_capacity);
 
-        let cur_layout = match HeapBuffer::layout_from_capacity(self.header().capacity) {
+        let new_capacity = Capacity::new(new_capacity)?;
+        let cur_capacity = self.header().capacity;
+
+        let cur_layout = match HeapBuffer::layout_from_capacity(cur_capacity) {
             Ok(layout) => layout,
             Err(_) => {
                 if cfg!(debug_assertions) {
@@ -118,21 +153,57 @@ impl HeapBuffer {
             }
         };
 
-        const ALLOC_LIMIT: usize = (isize::MAX as usize + 1) - HeapBuffer::align();
-        let new_alloc_size = size_of::<Header>().saturating_add(new_capacity);
-        if new_alloc_size > ALLOC_LIMIT {
-            return Err(ReserveError);
-        }
+        let len_heap = match (is_len_heap_layout(cur_capacity), is_len_heap_layout(new_capacity)) {
+            (false, false) => false,
+            (true, true) => true,
+            (true, false) | (false, true) => {
+                let str = self.as_str();
+                let mut new_buf = HeapBuffer::with_capacity(new_capacity.as_usize())?;
+                unsafe {
+                    ptr::copy_nonoverlapping(str.as_ptr(), new_buf.ptr.as_ptr(), str.len());
+                    new_buf.set_len(str.len());
+                    self.dealloc();
+                }
+                *self = new_buf;
+                return Ok(());
+            }
+        };
+
+        let new_alloc_size = {
+            #[cfg(target_pointer_width = "64")]
+            {
+                // Since The maximum size of `capacity` is limited to 2^56 - 1, we no longer need
+                // to check for overflow when rounding up to the nearest multiple of alignment.
+                size_of::<Header>().wrapping_add(new_capacity.as_usize())
+            }
+            #[cfg(target_pointer_width = "32")]
+            {
+                const ALLOC_LIMIT: usize = (isize::MAX as usize + 1) - HeapBuffer::align();
+                let mut alloc_size = size_of::<Header>().saturating_add(new_capacity.as_usize());
+                if len_heap {
+                    alloc_size = alloc_size.saturating_add(size_of::<usize>());
+                }
+                if alloc_size > ALLOC_LIMIT {
+                    return Err(ReserveError);
+                }
+                alloc_size
+            }
+        };
 
         // SAFETY:
-        // - `self.allocation` is already allocated by global allocator.
+        // - `self.allocation()` is already allocated by global allocator.
         // - current allocation is allocated by `cur_layout`.
         // - `new_alloc_size` is greater than zero.
         // - `new_alloc_size` is ensured not to overflow when rounded up to the nearest multiple of
-        //    alignment by `ALLOC_LIMIT`.
-        let allocation = unsafe { realloc(self.allocation(), cur_layout, new_alloc_size) };
+        //    alignment.
+        let mut allocation = unsafe { realloc(self.allocation(), cur_layout, new_alloc_size) };
         if allocation.is_null() {
             return Err(ReserveError);
+        }
+
+        if len_heap {
+            // SAFETY: `allocation` is non-null.
+            unsafe { allocation = allocation.add(size_of::<usize>()) };
         }
 
         // SAFETY:
@@ -149,7 +220,6 @@ impl HeapBuffer {
             let ptr = allocation.add(HeapBuffer::header_offset());
             self.ptr = NonNull::new_unchecked(ptr);
         }
-
         Ok(())
     }
 
@@ -194,10 +264,11 @@ impl HeapBuffer {
     /// # Safety
     /// - `len` bytes in the buffer must be valid UTF-8.
     /// - buffer is unique.
-    #[cfg(target_pointer_width = "64")]
     pub(super) unsafe fn set_len(&mut self, len: usize) {
         debug_assert!(self.is_unique());
-        self.len = match TextSize::new(len) {
+        debug_assert!(len <= self.capacity());
+
+        self.len = match TextLen::new(len) {
             Ok(len) => len,
             Err(_) => {
                 if cfg!(debug_assertions) {
@@ -208,15 +279,35 @@ impl HeapBuffer {
                 unsafe { hint::unreachable_unchecked() }
             }
         };
+
+        #[cold]
+        fn write_len_on_heap(ptr: NonNull<u8>, len: usize) {
+            // SAFETY: We just checked that `len` is stored on the heap.
+            unsafe {
+                let len_ptr = ptr.sub(HeapBuffer::header_offset()).sub(size_of::<usize>());
+                ptr::write(len_ptr.as_ptr().cast(), len);
+            }
+        }
+        if self.len.is_heap() {
+            write_len_on_heap(self.ptr, len);
+        }
     }
 
-    fn allocate_ptr(capacity: usize) -> Result<NonNull<u8>, ReserveError> {
+    fn allocate_ptr(capacity: Capacity) -> Result<NonNull<u8>, ReserveError> {
         let layout = HeapBuffer::layout_from_capacity(capacity)?;
 
         // SAFETY: layout is non-zero.
-        let allocation = unsafe { alloc(layout) };
+        let mut allocation = unsafe { alloc(layout) };
         if allocation.is_null() {
             return Err(ReserveError);
+        }
+
+        if is_len_heap_layout(capacity) {
+            // SAFETY:
+            // - `allocation` is non-null.
+            // - Since `layout` is created with the `capacity` and `is_len_heap_layout` is true for
+            // same `capacity`, we know that we reserved space for the length on the heap.
+            unsafe { allocation = allocation.add(size_of::<usize>()) };
         }
 
         // SAFETY:
@@ -229,8 +320,17 @@ impl HeapBuffer {
         }
     }
 
-    fn layout_from_capacity(capacity: usize) -> Result<Layout, ReserveError> {
-        let alloc_size = size_of::<Header>().checked_add(capacity).ok_or(ReserveError)?;
+    fn layout_from_capacity(capacity: Capacity) -> Result<Layout, ReserveError> {
+        let alloc_size = size_of::<Header>()
+            .checked_add(capacity.as_usize())
+            .and_then(|size| {
+                if is_len_heap_layout(capacity) {
+                    size.checked_add(size_of::<usize>())
+                } else {
+                    Some(size)
+                }
+            })
+            .ok_or(ReserveError)?;
         let align = HeapBuffer::align();
         Layout::from_size_align(alloc_size, align).map_err(
             #[cold]
@@ -239,11 +339,18 @@ impl HeapBuffer {
     }
 
     unsafe fn allocation(&self) -> *mut u8 {
-        unsafe { self.ptr.as_ptr().cast::<u8>().sub(Self::header_offset()) }
+        unsafe {
+            if self.len.is_heap() {
+                cold_path();
+                self.ptr.as_ptr().cast::<u8>().sub(Self::header_offset()).sub(size_of::<usize>())
+            } else {
+                self.ptr.as_ptr().cast::<u8>().sub(Self::header_offset())
+            }
+        }
     }
 
     fn header(&self) -> &Header {
-        unsafe { &*(self.allocation() as *const Header) }
+        unsafe { &*self.ptr.as_ptr().sub(HeapBuffer::header_offset()).cast() }
     }
 
     const fn align() -> usize {
@@ -271,7 +378,7 @@ const fn max(x: usize, y: usize) -> usize {
 mod internal {
     use super::*;
 
-    /// The length and capacity of a [`HeapBuffer`].
+    /// The length of a [`HeapBuffer`].
     ///
     /// An unsinged integer that uses `size_of::<usize>() - 1` bytes, and the rest 1 byte is used
     /// as a tag.
@@ -296,37 +403,92 @@ mod internal {
     /// heap. Therefore, on 32-bit architecture, we use 2^24 - 2 as the maximum value, and 2^24 - 1
     /// as the tag that indicates the length/capacity is stored in the heap.
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    pub(super) struct TextSize(usize);
+    pub(super) struct TextLen(usize);
 
     const USIZE_SIZE: usize = size_of::<usize>();
 
-    impl TextSize {
-        #[cfg(target_pointer_width = "64")]
-        const MAX: usize = {
-            let mut bytes = [255; USIZE_SIZE];
-            bytes[USIZE_SIZE - 1] = 0;
-            usize::from_le_bytes(bytes)
-        };
+    const MAX_LEN: usize = {
+        let mut bytes = [255; USIZE_SIZE];
+        bytes[USIZE_SIZE - 1] = 0;
+        usize::from_le_bytes(bytes) - if cfg!(target_pointer_width = "32") { 1 } else { 0 }
+    };
 
+    impl TextLen {
         const TAG: usize = {
             let mut bytes = [0; USIZE_SIZE];
             bytes[USIZE_SIZE - 1] = LastByte::HeapMarker as u8;
             usize::from_ne_bytes(bytes)
         };
 
-        #[cfg(target_pointer_width = "64")]
+        #[cfg(target_pointer_width = "32")]
+        const ON_THE_HEAP: usize = {
+            let mut bytes = [255; USIZE_SIZE];
+            bytes[USIZE_SIZE - 1] = LastByte::HeapMarker as u8;
+            usize::from_le_bytes(bytes)
+        };
+
         pub(super) const fn new(size: usize) -> Result<Self, ReserveError> {
-            if size > Self::MAX {
+            if size > MAX_LEN {
+                #[cfg(target_pointer_width = "64")]
                 return Err(ReserveError);
+                #[cfg(target_pointer_width = "32")]
+                return Ok(TextLen(Self::ON_THE_HEAP));
             }
-            Ok(TextSize(size.to_le() | Self::TAG))
+            Ok(TextLen(size.to_le() | Self::TAG))
         }
 
-        #[cfg(target_pointer_width = "64")]
+        #[inline(always)]
+        pub(super) const fn is_heap(&self) -> bool {
+            #[cfg(target_pointer_width = "64")]
+            return false;
+            #[cfg(target_pointer_width = "32")]
+            return self.0 == Self::ON_THE_HEAP;
+        }
+
         pub(super) fn as_usize(self) -> usize {
             let size = self.0 ^ Self::TAG;
             let bytes = size.to_ne_bytes();
             usize::from_le_bytes(bytes)
         }
     }
+
+    #[cfg_attr(target_pointer_width = "64", allow(unused_variables))]
+    pub(super) fn is_len_heap_layout(capacity: Capacity) -> bool {
+        #[cfg(target_pointer_width = "64")]
+        return false;
+        #[cfg(target_pointer_width = "32")]
+        return capacity.as_usize() > MAX_LEN;
+    }
+
+    /// The capacity of a [`HeapBuffer`].
+    ///
+    /// Maximum capacity is limited to:
+    ///
+    /// - (on 64-bit architecture) 2^56 - 1
+    /// - (on 32-bit architecture) 2^32 - 1
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub(super) struct Capacity(usize);
+
+    impl Capacity {
+        pub(crate) fn new(capacity: usize) -> Result<Self, ReserveError> {
+            #[cfg(target_pointer_width = "64")]
+            if capacity > MAX_LEN {
+                cold_path();
+                return Err(ReserveError);
+            }
+            Ok(Capacity(capacity))
+        }
+
+        pub(crate) fn as_usize(&self) -> usize {
+            self.0
+        }
+    }
+
+    // TODO: Replace with hint::cold_path when it becomes stable.
+    // Related issues:
+    // - https://github.com/rust-lang/rust/issues/26179
+    // - https://github.com/rust-lang/rust/pull/120370
+    // - https://github.com/rust-lang/libs-team/issues/510
+    #[cold]
+    pub(super) fn cold_path() {}
 }

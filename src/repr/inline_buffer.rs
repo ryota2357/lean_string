@@ -4,6 +4,10 @@ use super::*;
 #[repr(C, align(8))]
 pub(super) struct InlineBuffer([u8; MAX_INLINE_SIZE]);
 
+#[cfg(target_pointer_width = "32")]
+#[repr(C, align(4))]
+pub(super) struct InlineBuffer([u8; MAX_INLINE_SIZE]);
+
 impl InlineBuffer {
     /// # Safety
     /// `text` must have a length less than or equal to `MAX_INLINE_SIZE`.

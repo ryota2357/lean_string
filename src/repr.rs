@@ -31,6 +31,10 @@ const MAX_INLINE_SIZE: usize = 2 * size_of::<usize>();
 #[cfg(target_pointer_width = "64")]
 pub(crate) struct Repr(*const (), [u8; 7], LastByte);
 
+#[repr(C)]
+#[cfg(target_pointer_width = "32")]
+pub(crate) struct Repr(*const (), [u8; 3], LastByte);
+
 fn _static_assert() {
     const {
         assert!(size_of::<Repr>() == MAX_INLINE_SIZE);
@@ -132,6 +136,23 @@ impl Repr {
         }
 
         len
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked the discriminant to make sure we're heap allocated
+            unsafe { self.as_heap_buffer() }.len()
+        } else if self.is_static_buffer() {
+            // SAFETY: we just checked that `self` is StaticBuffer
+            unsafe { self.as_static_buffer() }.len()
+        } else {
+            // Remaining is InlineBuffer
+            (self.last_byte() as usize)
+                .wrapping_sub(LastByte::MASK_1100_0000 as usize)
+                .min(MAX_INLINE_SIZE)
+        }
     }
 
     #[inline]
