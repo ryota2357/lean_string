@@ -61,6 +61,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - name: 64-bit BE
             target: powerpc64-unknown-linux-gnu
+          - name: 32-bit LE
+            target: i686-unknown-linux-gnu
+          - name: 32-bit BE
+            target: powerpc-unknown-linux-gnu
       fail-fast: false
     steps:
       - name: Checkout
