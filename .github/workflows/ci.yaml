@@ -51,6 +51,38 @@ jobs:
       - name: Test (Loom)
         run: RUSTFLAGS="--cfg loom" cargo test --test loom ${{ matrix.opt }} --features loom -- --test-threads=1
 
+  cross:
+    name: Cross (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - powerpc64-unknown-linux-gnu
+          - i686-unknown-linux-gnu
+          - powerpc-unknown-linux-gnu
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cross test --target ${{ matrix.target }} --all-features
+
+      - name: Test (release)
+        run: cross test --target ${{ matrix.target }} --all-features --release
+
+      - name: Test (Loom)
+        run: RUSTFLAGS="--cfg loom" cross test --target ${{ matrix.target }} --test loom --features loom -- --test-threads=1
+
+      - name: Test (Loom, release)
+        run: RUSTFLAGS="--cfg loom" cross test --target ${{ matrix.target }} --test loom --release --features loom -- --test-threads=1
+
   miri:
     name: Miri (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -74,6 +106,9 @@ jobs:
         run: |
           rustup toolchain install nightly --profile minimal
           rustup +nightly component add miri
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Test (default)
         run: cargo +nightly miri test --target ${{ matrix.target }}
