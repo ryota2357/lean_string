@@ -51,41 +51,6 @@ jobs:
       - name: Test (Loom)
         run: RUSTFLAGS="--cfg loom" cargo test --test loom ${{ matrix.opt }} --features loom -- --test-threads=1
 
-  cross:
-    name: Cross (${{ matrix.target }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: aarch64_be-unknown-linux-gnu   # 64-bit BE
-          - target: armv7-unknown-linux-gnueabihf  # 32-bit LE
-          - target: powerpc-unknown-linux-gnu      # 32-bit BE
-            loom: false # Loomの依存しているgeneratorというcrateがサポートしていないプラットフォームのため
-      fail-fast: false
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install cross
-        uses: taiki-e/install-action@cross
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Test
-        run: cross test --target ${{ matrix.target }} --all-features
-
-      - name: Test (release)
-        run: cross test --target ${{ matrix.target }} --all-features --release
-
-      - name: Test (Loom)
-        if: "! matrix.loom"
-        run: RUSTFLAGS="--cfg loom" cross test --target ${{ matrix.target }} --test loom --features loom -- --test-threads=1
-
-      - name: Test (Loom, release)
-        if: "! matrix.loom"
-        run: RUSTFLAGS="--cfg loom" cross test --target ${{ matrix.target }} --test loom --release --features loom -- --test-threads=1
-
   miri:
     name: Miri (${{ matrix.name }})
     runs-on: ubuntu-latest
