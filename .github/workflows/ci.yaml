@@ -56,10 +56,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - powerpc64-unknown-linux-gnu
-          - i686-unknown-linux-gnu
-          - powerpc-unknown-linux-gnu
+        include:
+          - target: aarch64_be-unknown-linux-gnu   # 64-bit BE
+          - target: armv7-unknown-linux-gnueabihf  # 32-bit LE
+          - target: powerpc-unknown-linux-gnu      # 32-bit BE
+            loom: false # Loomの依存しているgeneratorというcrateがサポートしていないプラットフォームのため
       fail-fast: false
     steps:
       - name: Checkout
@@ -78,9 +79,11 @@ jobs:
         run: cross test --target ${{ matrix.target }} --all-features --release
 
       - name: Test (Loom)
+        if: "! matrix.loom"
         run: RUSTFLAGS="--cfg loom" cross test --target ${{ matrix.target }} --test loom --features loom -- --test-threads=1
 
       - name: Test (Loom, release)
+        if: "! matrix.loom"
         run: RUSTFLAGS="--cfg loom" cross test --target ${{ matrix.target }} --test loom --release --features loom -- --test-threads=1
 
   miri:
