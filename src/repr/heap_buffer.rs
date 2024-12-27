@@ -245,18 +245,6 @@ impl HeapBuffer {
         self.header().count.load(Acquire) == 1
     }
 
-    // /// # Safety
-    // /// Caller must ensure tha following:
-    // ///  - The current reference count is greater than 0 when calling this method.
-    // ///  - If the return value is 1, this HeapBuffer is properly destroyed.
-    // pub(super) unsafe fn decrement_reference_count(&self) -> usize {
-    //     self.header().count.fetch_sub(1, Release)
-    // }
-    //
-    // pub(super) fn increment_reference_count(&self) -> usize {
-    //     self.header().count.fetch_add(1, Relaxed)
-    // }
-
     pub(super) fn reference_count(&self) -> &AtomicUsize {
         &self.header().count
     }
