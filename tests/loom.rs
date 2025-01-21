@@ -56,21 +56,21 @@ test_model! {
 
 test_model! {
     run: {
-        pop2().join().unwrap();
+        remove2().join().unwrap();
     }
-    fn pop2() -> JoinHandle<()> {
+    fn remove2() -> JoinHandle<()> {
         let mut one = LeanString::from("abcdefghijklmnopqrstuvwxyz");
         let two = one.clone();
 
         let th = thread::spawn(move || {
             let mut three = two.clone();
-            assert_eq!(three.pop(), Some('z'));
+            assert_eq!(three.remove(3), 'd');
             assert_eq!(two, "abcdefghijklmnopqrstuvwxyz");
-            assert_eq!(three, "abcdefghijklmnopqrstuvwxy");
+            assert_eq!(three, "abcefghijklmnopqrstuvwxyz");
         });
 
-        assert_eq!(one.pop(), Some('z'));
-        assert_eq!(one, "abcdefghijklmnopqrstuvwxy");
+        assert_eq!(one.remove(3), 'd');
+        assert_eq!(one, "abcefghijklmnopqrstuvwxyz");
 
         th
     }
