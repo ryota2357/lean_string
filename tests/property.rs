@@ -69,6 +69,32 @@ fn collect_from_strings(input: Vec<String>) {
 macro_rules! test_integer_to_lean_string {
     ($($ty:ty),* $(,)?) => {$(
         paste::paste! {
+            #[test]
+            fn [<$ty _to_lean_string>]() {
+                for num in <$ty>::MIN..=<$ty>::MAX {
+                    let lean = num.to_string();
+                    let string = num.to_string();
+                    assert_eq!(lean, string);
+                }
+            }
+            #[test]
+            fn [<nonzero_ $ty _to_lean_string>]() {
+                for num in <$ty>::MIN..=<$ty>::MAX {
+                    if num == 0 { continue };
+                    let num = core::num::NonZero::<$ty>::new(num).unwrap();
+                    let lean = num.to_string();
+                    let string = num.to_string();
+                    assert_eq!(lean, string);
+                }
+            }
+        }
+    )*};
+}
+test_integer_to_lean_string!(u8, i8);
+
+macro_rules! prop_test_integer_to_lean_string {
+    ($($ty:ty),* $(,)?) => {$(
+        paste::paste! {
             #[property_test]
             #[cfg_attr(miri, ignore)]
             fn [<$ty _to_lean_string>](i: $ty) {
@@ -82,7 +108,7 @@ macro_rules! test_integer_to_lean_string {
         }
     )*};
 }
-test_integer_to_lean_string!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize);
+prop_test_integer_to_lean_string!(u16, i16, u32, i32, u64, i64, u128, i128, usize, isize);
 
 #[property_test]
 #[cfg_attr(miri, ignore)]
