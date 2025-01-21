@@ -92,7 +92,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if any of the following conditions are met:
+    /// Panics if any of the following conditions is met:
     ///
     /// - The system is out-of-memory.
     /// - On 64-bit architecture, the `capacity` is greater than `2^56 - 1`.
@@ -352,7 +352,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if any of the following conditions are met:
+    /// Panics if any of the following conditions is met:
     ///
     /// - The system is out-of-memory.
     /// - On 64-bit architecture, the `capacity` is greater than `2^56 - 1`.
@@ -366,7 +366,7 @@ impl LeanString {
     /// # use lean_string::LeanString;
     /// let mut s = LeanString::new();
     ///
-    /// // We have a inline strage on the stack.
+    /// // We have an inline storage on the stack.
     /// assert_eq!(s.capacity(), 2 * size_of::<usize>());
     /// assert!(!s.is_heap_allocated());
     ///
