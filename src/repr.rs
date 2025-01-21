@@ -336,7 +336,7 @@ impl Repr {
             &mut slice[len..len + str_len]
         };
 
-        debug_assert_eq!(push_buffer.len(), string.as_bytes().len());
+        debug_assert_eq!(push_buffer.len(), string.len());
         push_buffer.copy_from_slice(string.as_bytes());
 
         // SAFETY:
