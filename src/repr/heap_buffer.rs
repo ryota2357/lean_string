@@ -245,6 +245,10 @@ impl HeapBuffer {
         self.header().count.load(Acquire) == 1
     }
 
+    pub(super) fn is_len_on_heap(&self) -> bool {
+        self.len.is_heap()
+    }
+
     pub(super) fn reference_count(&self) -> &AtomicUsize {
         &self.header().count
     }
@@ -253,7 +257,7 @@ impl HeapBuffer {
     /// - `len` bytes in the buffer must be valid UTF-8.
     /// - buffer is unique.
     pub(super) unsafe fn set_len(&mut self, len: usize) {
-        debug_assert!(self.is_unique());
+        debug_assert!(if self.is_len_on_heap() { self.is_unique() } else { true });
         debug_assert!(len <= self.capacity());
 
         self.len = match TextLen::new(len) {

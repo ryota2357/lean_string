@@ -364,23 +364,30 @@ impl Repr {
             // SAFETY: We just checked that `self` is HeapBuffer
             let heap = unsafe { self.as_heap_buffer_mut() };
 
-            // See `reverse` method for the explanation of the ordering.
-            if heap.reference_count().fetch_sub(1, Release) == 1 {
-                // `heap` is unique, we can set the new length in place.
-
-                // See `reverse` method for the explanation of the ordering.
-                heap.reference_count().fetch_add(1, Acquire);
-
-                // SAFETY: `heap` is unique, we can reallocate in place.
+            if !heap.is_len_on_heap() {
+                // Since len is inlined and we don't modify the buffer by popping a char, it is ok
+                // to just set the new length.
+                // SAFETY: `new_len <= len <= capacity`
                 unsafe { heap.set_len(new_len) };
             } else {
-                // SAFETY: `ptr` is valid for `len` bytes, and `HeapBuffer` contains valid UTF-8.
-                let str = unsafe {
-                    let ptr = self.0 as *mut u8;
-                    let slice = slice::from_raw_parts_mut(ptr, new_len);
-                    str::from_utf8_unchecked_mut(slice)
-                };
-                *self = Repr::from_str(str)?;
+                // See `reverse` method for the explanation of the ordering.
+                if heap.reference_count().fetch_sub(1, Release) == 1 {
+                    // `heap` is unique, we can set the new length in place.
+
+                    // See `reverse` method for the explanation of the ordering.
+                    heap.reference_count().fetch_add(1, Acquire);
+
+                    // SAFETY: `heap` is unique, we can reallocate in place.
+                    unsafe { heap.set_len(new_len) };
+                } else {
+                    // SAFETY: `ptr` is valid for `len` bytes, and `HeapBuffer` contains valid UTF-8.
+                    let str = unsafe {
+                        let ptr = self.0 as *mut u8;
+                        let slice = slice::from_raw_parts_mut(ptr, new_len);
+                        str::from_utf8_unchecked_mut(slice)
+                    };
+                    *self = Repr::from_str(str)?;
+                }
             }
         } else if self.is_static_buffer() {
             // SAFETY:
