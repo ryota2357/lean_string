@@ -174,7 +174,8 @@ fn pop_keep_capacity() {
 }
 
 #[test]
-fn pop_cow() {
+fn pop_share_buffer() {
+    // s is inlined
     let mut s = LeanString::from("abcdefgh");
     assert_eq!(s.pop(), Some('h'));
     assert_eq!(s.len(), 7);
@@ -198,7 +199,9 @@ fn pop_cow() {
 
     // s is not changed
     assert_eq!(s, "abcdefghijklmnopqrstuvwxyz");
-    assert_ne!(s.as_ptr(), s2.as_ptr());
+
+    // buffer is shared
+    assert_eq!(s.as_ptr(), s2.as_ptr());
 }
 
 #[test]
