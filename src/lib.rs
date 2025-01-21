@@ -528,8 +528,13 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if cloning the [`LeanString`] fails due to the system being out-of-memory. If you
-    /// want to handle such a problem manually, use [`LeanString::try_pop()`].
+    /// This method does not clone the [`LeanString`] without all of following conditions are true:
+    ///
+    /// - 32-bit architecture
+    /// - The [`LeanString`] is not unique.
+    /// - The length of the [`LeanString`] is greater than `2^26 - 1`.
+    ///
+    /// If you want to handle such a problem manually, use [`LeanString::try_pop()`].
     ///
     /// # Examples
     ///

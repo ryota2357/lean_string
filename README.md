@@ -33,15 +33,15 @@ use lean_string::LeanString;
 let small = LeanString::from("Hello");
 
 // More than 16 bytes, stored on the heap (64-bit architecture).
-let large = LeanString::from("This is a not long but can't store inlined!");
+let large = LeanString::from("This is a not long but can't store inlined");
 
 // Clone is O(1), heap buffer is shared.
 let mut cloned = large.clone();
 
 // Mutating a shared string will copy the heap buffer. (CoW)
-assert_eq!(cloned.pop(), Some('!'));
-assert_eq!(cloned, "This is a not long but can't store inlined");
-assert_eq!(large, cloned + "!");
+cloned.push('!');
+assert_eq!(cloned, "This is a not long but can't store inlined!");
+assert_eq!(large  + "!", cloned);
 ```
 
 ## Comparison
