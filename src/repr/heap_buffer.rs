@@ -266,7 +266,7 @@ impl HeapBuffer {
                 if cfg!(debug_assertions) {
                     panic!("Invalid `set_len` call");
                 }
-                // SAFETY: `TextSize::new` should not return `Err` because `len` bytes is allocated
+                // SAFETY: `TextSize::new` should not return `Err` because `len` bytes are allocated
                 // as a valid UTF-8 string buffer.
                 unsafe { hint::unreachable_unchecked() }
             }
