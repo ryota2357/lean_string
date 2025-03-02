@@ -1,6 +1,6 @@
-use crate::{repr::Repr, LeanString, ToLeanStringError, UnwrapWithMsg};
+use crate::{LeanString, ToLeanStringError, UnwrapWithMsg, repr::Repr};
 use alloc::string::String;
-use castaway::{match_type, LifetimeFree};
+use castaway::{LifetimeFree, match_type};
 use core::{fmt, fmt::Write, num::NonZero};
 
 /// A trait for converting a value to a [`LeanString`].
