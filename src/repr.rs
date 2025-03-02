@@ -657,7 +657,7 @@ impl Repr {
             (ptr, MAX_INLINE_SIZE)
         };
 
-        slice::from_raw_parts_mut(ptr, cap)
+        unsafe { slice::from_raw_parts_mut(ptr, cap) }
     }
 
     /// Gets a mutable str of length buffer.
@@ -726,30 +726,30 @@ impl Repr {
     #[inline(always)]
     unsafe fn as_inline_buffer_mut(&mut self) -> &mut InlineBuffer {
         // SAFETY: A `Repr` is transmuted from `InlineBuffer`
-        &mut *(self as *mut _ as *mut InlineBuffer)
+        unsafe { &mut *(self as *mut _ as *mut InlineBuffer) }
     }
 
     #[inline(always)]
     unsafe fn as_heap_buffer(&self) -> &HeapBuffer {
         // SAFETY: A `Repr` is transmuted from `HeapBuffer`
-        &*(self as *const _ as *const HeapBuffer)
+        unsafe { &*(self as *const _ as *const HeapBuffer) }
     }
 
     #[inline(always)]
     unsafe fn as_heap_buffer_mut(&mut self) -> &mut HeapBuffer {
         // SAFETY: A `Repr` is transmuted from `HeapBuffer`
-        &mut *(self as *mut _ as *mut HeapBuffer)
+        unsafe { &mut *(self as *mut _ as *mut HeapBuffer) }
     }
 
     #[inline(always)]
     unsafe fn as_static_buffer(&self) -> &StaticBuffer {
         // SAFETY: A `Repr` is transmuted from `StaticBuffer`
-        &*(self as *const _ as *const StaticBuffer)
+        unsafe { &*(self as *const _ as *const StaticBuffer) }
     }
 
     #[inline(always)]
     unsafe fn as_static_buffer_mut(&mut self) -> &mut StaticBuffer {
         // SAFETY: A `Repr` is transmuted from `StaticBuffer`
-        &mut *(self as *mut _ as *mut StaticBuffer)
+        unsafe { &mut *(self as *mut _ as *mut StaticBuffer) }
     }
 }

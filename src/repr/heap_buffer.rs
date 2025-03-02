@@ -238,7 +238,9 @@ impl HeapBuffer {
                 unsafe { hint::unreachable_unchecked() }
             }
         };
-        dealloc(self.allocation(), layout);
+        unsafe {
+            dealloc(self.allocation(), layout);
+        }
     }
 
     pub(super) fn is_unique(&self) -> bool {

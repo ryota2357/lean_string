@@ -2,7 +2,7 @@
 name = "lean_string"
 description = "Compact, clone-on-write string."
 version = "0.4.0"
-edition = "2021"
+edition = "2024"
 authors = ["ryota2357"]
 repository = "https://github.com/ryota2357/lean_string"
 readme = "README.md"
