@@ -3,9 +3,9 @@ use super::ReserveError;
 use core::{mem, ptr, slice, str};
 
 #[cfg(not(loom))]
-use core::sync::atomic::{fence, Ordering::*};
+use core::sync::atomic::{Ordering::*, fence};
 #[cfg(loom)]
-use loom::sync::atomic::{fence, Ordering::*};
+use loom::sync::atomic::{Ordering::*, fence};
 
 mod heap_buffer;
 use heap_buffer::HeapBuffer;
@@ -75,11 +75,7 @@ impl Repr {
         // SAFETY: "true" and "false" are short enough (less than 8 bytes) to fit in InlineBuffer.
         const TRUE: Repr = Repr::from_inline(unsafe { InlineBuffer::new("true") });
         const FALSE: Repr = Repr::from_inline(unsafe { InlineBuffer::new("false") });
-        if b {
-            TRUE
-        } else {
-            FALSE
-        }
+        if b { TRUE } else { FALSE }
     }
 
     #[inline]

@@ -116,11 +116,7 @@ impl HeapBuffer {
                 ptr::read(len_ptr.as_ptr().cast())
             }
         }
-        if self.len.is_heap() {
-            len_on_heap(self.ptr)
-        } else {
-            self.len.as_usize()
-        }
+        if self.len.is_heap() { len_on_heap(self.ptr) } else { self.len.as_usize() }
     }
 
     pub(super) fn as_str(&self) -> &str {
@@ -362,11 +358,7 @@ impl HeapBuffer {
 
 /// const version of `std::cmp::max::<usize>(x, y)`.
 const fn max(x: usize, y: usize) -> usize {
-    if x > y {
-        x
-    } else {
-        y
-    }
+    if x > y { x } else { y }
 }
 
 mod internal {
