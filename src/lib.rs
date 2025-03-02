@@ -597,7 +597,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if the following conditions:
+    /// Panics if any of the following conditions:
     ///
     /// 1. `idx` is larger than or equal tothe [`LeanString`]'s length, or if it does not lie on a [`char`]
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
@@ -639,6 +639,11 @@ impl LeanString {
     ///
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
     /// Otherwise it behaves the same as [`LeanString::remove()`].
+    ///
+    /// # Panics
+    ///
+    /// This method still panics if the `idx` is larger than or equal to the [`LeanString`]'s
+    /// length, or if it does not lie on a [`char`] boundary.
     #[inline]
     pub fn try_remove(&mut self, idx: usize) -> Result<char, ReserveError> {
         self.0.remove(idx)
@@ -682,7 +687,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if the following conditions:
+    /// Panics if any of the following conditions:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`]
     ///    boundary.
@@ -728,7 +733,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if the following conditions:
+    /// Panics if any of the following conditions:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`] boundary.
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
