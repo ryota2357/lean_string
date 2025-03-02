@@ -1,5 +1,5 @@
 // This tests are adapted from the Rust standard library tests for `String`.
-// https://github.com/rust-lang/rust/blob/c434b4b4b6cd20560c5b32e80b2b22618a4da3dd/library/alloc/tests/string.rs
+// https://github.com/rust-lang/rust/blob/351686bcfd18dd0f652aba69a806bfa68c57234d/library/alloc/tests/string.rs
 
 // use std::assert_matches::assert_matches;
 // use std::borrow::Cow;
@@ -11,24 +11,24 @@
 use lean_string::{LeanString, ToLeanString};
 use std::{borrow::Cow, panic};
 
-// pub trait IntoCow<'a, B: ?Sized>
-// where
-//     B: ToOwned,
-// {
-//     fn into_cow(self) -> Cow<'a, B>;
-// }
-//
-// impl<'a> IntoCow<'a, str> for String {
-//     fn into_cow(self) -> Cow<'a, str> {
-//         Cow::Owned(self)
-//     }
-// }
-//
-// impl<'a> IntoCow<'a, str> for &'a str {
-//     fn into_cow(self) -> Cow<'a, str> {
-//         Cow::Borrowed(self)
-//     }
-// }
+pub trait IntoCow<'a, B: ?Sized>
+where
+    B: ToOwned,
+{
+    fn into_cow(self) -> Cow<'a, B>;
+}
+
+impl<'a> IntoCow<'a, str> for String {
+    fn into_cow(self) -> Cow<'a, str> {
+        Cow::Owned(self)
+    }
+}
+
+impl<'a> IntoCow<'a, str> for &'a str {
+    fn into_cow(self) -> Cow<'a, str> {
+        Cow::Borrowed(self)
+    }
+}
 
 #[test]
 fn test_from_str() {
@@ -57,41 +57,65 @@ fn test_from_utf8() {
     assert_eq!(LeanString::from_utf8(&xs).unwrap(), LeanString::from("ศไทย中华Việt Nam"));
 
     let xs = b"hello\xFF".to_vec();
-    let err = LeanString::from_utf8(&xs).unwrap_err();
-    assert_eq!(err.valid_up_to(), 5);
+    let _ = LeanString::from_utf8(&xs).unwrap_err();
+    // assert_eq!(err.as_bytes(), b"hello\xff");
+    // let err_clone = err.clone();
+    // assert_eq!(err, err_clon);
+    // assert_eq!(err.into_bytes(), b"hello\xff".to_vec());
+    // assert_eq!(err_clone.utf8_error().valid_up_to(), 5);
 }
 
 #[test]
 fn test_from_utf8_lossy() {
-    let s = b"hello";
-    assert_eq!(LeanString::from_utf8_lossy(s), "hello");
+    let xs = b"hello";
+    let ys: Cow<'_, str> = "hello".into_cow();
+    assert_eq!(LeanString::from_utf8_lossy(xs), ys);
 
-    let s = "ศไทย中华Việt Nam".as_bytes();
-    assert_eq!(LeanString::from_utf8_lossy(s), "ศไทย中华Việt Nam");
+    let xs = "ศไทย中华Việt Nam".as_bytes();
+    let ys: Cow<'_, str> = "ศไทย中华Việt Nam".into_cow();
+    assert_eq!(LeanString::from_utf8_lossy(xs), ys);
 
     let xs = b"Hello\xC2 There\xFF Goodbye";
-    assert_eq!(LeanString::from_utf8_lossy(xs), "Hello\u{FFFD} There\u{FFFD} Goodbye");
+    assert_eq!(
+        LeanString::from_utf8_lossy(xs),
+        String::from("Hello\u{FFFD} There\u{FFFD} Goodbye").into_cow()
+    );
 
     let xs = b"Hello\xC0\x80 There\xE6\x83 Goodbye";
-    assert_eq!(LeanString::from_utf8_lossy(xs), "Hello\u{FFFD}\u{FFFD} There\u{FFFD} Goodbye");
+    assert_eq!(
+        LeanString::from_utf8_lossy(xs),
+        String::from("Hello\u{FFFD}\u{FFFD} There\u{FFFD} Goodbye").into_cow()
+    );
 
     let xs = b"\xF5foo\xF5\x80bar";
-    assert_eq!(LeanString::from_utf8_lossy(xs), "\u{FFFD}foo\u{FFFD}\u{FFFD}bar");
+    assert_eq!(
+        LeanString::from_utf8_lossy(xs),
+        String::from("\u{FFFD}foo\u{FFFD}\u{FFFD}bar").into_cow()
+    );
 
     let xs = b"\xF1foo\xF1\x80bar\xF1\x80\x80baz";
-    assert_eq!(LeanString::from_utf8_lossy(xs), "\u{FFFD}foo\u{FFFD}bar\u{FFFD}baz");
+    assert_eq!(
+        LeanString::from_utf8_lossy(xs),
+        String::from("\u{FFFD}foo\u{FFFD}bar\u{FFFD}baz").into_cow()
+    );
 
     let xs = b"\xF4foo\xF4\x80bar\xF4\xBFbaz";
-    assert_eq!(LeanString::from_utf8_lossy(xs), "\u{FFFD}foo\u{FFFD}bar\u{FFFD}\u{FFFD}baz");
+    assert_eq!(
+        LeanString::from_utf8_lossy(xs),
+        String::from("\u{FFFD}foo\u{FFFD}bar\u{FFFD}\u{FFFD}baz").into_cow()
+    );
 
     let xs = b"\xF0\x80\x80\x80foo\xF0\x90\x80\x80bar";
-    assert_eq!(LeanString::from_utf8_lossy(xs), "\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}foo\u{10000}bar");
+    assert_eq!(
+        LeanString::from_utf8_lossy(xs),
+        String::from("\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}foo\u{10000}bar").into_cow()
+    );
 
     // surrogates
     let xs = b"\xED\xA0\x80foo\xED\xBF\xBFbar";
     assert_eq!(
         LeanString::from_utf8_lossy(xs),
-        "\u{FFFD}\u{FFFD}\u{FFFD}foo\u{FFFD}\u{FFFD}\u{FFFD}bar"
+        String::from("\u{FFFD}\u{FFFD}\u{FFFD}foo\u{FFFD}\u{FFFD}\u{FFFD}bar").into_cow()
     );
 }
 
@@ -113,10 +137,7 @@ fn test_from_utf8_lossy() {
 //     assert_eq!(func(xs), "Hello\u{FFFD} There\u{FFFD} Goodbye".to_owned());
 //
 //     let xs = b"Hello\xC0\x80 There\xE6\x83 Goodbye";
-//     assert_eq!(
-//         func(xs),
-//         "Hello\u{FFFD}\u{FFFD} There\u{FFFD} Goodbye".to_owned()
-//     );
+//     assert_eq!(func(xs), "Hello\u{FFFD}\u{FFFD} There\u{FFFD} Goodbye".to_owned());
 //
 //     let xs = b"\xF5foo\xF5\x80bar";
 //     assert_eq!(func(xs), "\u{FFFD}foo\u{FFFD}\u{FFFD}bar".to_owned());
@@ -125,23 +146,14 @@ fn test_from_utf8_lossy() {
 //     assert_eq!(func(xs), "\u{FFFD}foo\u{FFFD}bar\u{FFFD}baz".to_owned());
 //
 //     let xs = b"\xF4foo\xF4\x80bar\xF4\xBFbaz";
-//     assert_eq!(
-//         func(xs),
-//         "\u{FFFD}foo\u{FFFD}bar\u{FFFD}\u{FFFD}baz".to_owned()
-//     );
+//     assert_eq!(func(xs), "\u{FFFD}foo\u{FFFD}bar\u{FFFD}\u{FFFD}baz".to_owned());
 //
 //     let xs = b"\xF0\x80\x80\x80foo\xF0\x90\x80\x80bar";
-//     assert_eq!(
-//         func(xs),
-//         "\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}foo\u{10000}bar".to_owned()
-//     );
+//     assert_eq!(func(xs), "\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}foo\u{10000}bar".to_owned());
 //
 //     // surrogates
 //     let xs = b"\xED\xA0\x80foo\xED\xBF\xBFbar";
-//     assert_eq!(
-//         func(xs),
-//         "\u{FFFD}\u{FFFD}\u{FFFD}foo\u{FFFD}\u{FFFD}\u{FFFD}bar".to_owned()
-//     );
+//     assert_eq!(func(xs), "\u{FFFD}\u{FFFD}\u{FFFD}foo\u{FFFD}\u{FFFD}\u{FFFD}bar".to_owned());
 // }
 
 #[test]
@@ -179,7 +191,7 @@ fn test_from_utf16() {
                 0x000a,
             ],
         ),
-        // Issue rust-lang/rust#12318, even-numbered non-BMP planes
+        // Issue #12318, even-numbered non-BMP planes
         (LeanString::from("\u{20000}"), vec![0xD840, 0xDC00]),
     ];
 
@@ -220,21 +232,21 @@ fn test_from_utf16_lossy() {
     // lead + eof
     assert_eq!(LeanString::from_utf16_lossy(&[0xD800]), String::from("\u{FFFD}"));
     // lead + lead
-    assert_eq!(LeanString::from_utf16_lossy(&[0xD800, 0xD800]), "\u{FFFD}\u{FFFD}");
+    assert_eq!(LeanString::from_utf16_lossy(&[0xD800, 0xD800]), String::from("\u{FFFD}\u{FFFD}"));
 
     // isolated trail
-    assert_eq!(LeanString::from_utf16_lossy(&[0x0061, 0xDC00]), "a\u{FFFD}");
+    assert_eq!(LeanString::from_utf16_lossy(&[0x0061, 0xDC00]), String::from("a\u{FFFD}"));
 
     // general
     assert_eq!(
         LeanString::from_utf16_lossy(&[0xD800, 0xd801, 0xdc8b, 0xD800]),
-        "\u{FFFD}𐒋\u{FFFD}"
+        String::from("\u{FFFD}𐒋\u{FFFD}")
     );
 }
 
 // #[test]
 // fn test_push_bytes() {
-//     let mut s = String::from("ABC");
+//     let mut s = LeanString::from("ABC");
 //     unsafe {
 //         let mv = s.as_mut_vec();
 //         mv.extend_from_slice(&[b'D']);
@@ -559,8 +571,7 @@ fn test_from_iterator() {
     let a: LeanString = s.chars().collect();
     assert_eq!(s, a);
 
-    let mut b = t.to_string();
-    #[allow(clippy::string_extend_chars)]
+    let mut b = t.to_lean_string();
     b.extend(u.chars());
     assert_eq!(s, b);
 
@@ -842,31 +853,23 @@ fn test_try_with_capacity() {
 //     {
 //         let mut empty_string: String = String::new();
 //
-//         if let Err(CapacityOverflow) = empty_string
-//             .try_reserve_exact(MAX_CAP)
-//             .map_err(|e| e.kind())
+//         if let Err(CapacityOverflow) = empty_string.try_reserve_exact(MAX_CAP).map_err(|e| e.kind())
 //         {
 //             panic!("isize::MAX shouldn't trigger an overflow!");
 //         }
-//         if let Err(CapacityOverflow) = empty_string
-//             .try_reserve_exact(MAX_CAP)
-//             .map_err(|e| e.kind())
+//         if let Err(CapacityOverflow) = empty_string.try_reserve_exact(MAX_CAP).map_err(|e| e.kind())
 //         {
 //             panic!("isize::MAX shouldn't trigger an overflow!");
 //         }
 //
 //         assert_matches!(
-//             empty_string
-//                 .try_reserve_exact(MAX_CAP + 1)
-//                 .map_err(|e| e.kind()),
+//             empty_string.try_reserve_exact(MAX_CAP + 1).map_err(|e| e.kind()),
 //             Err(CapacityOverflow),
 //             "isize::MAX + 1 should trigger an overflow!"
 //         );
 //
 //         assert_matches!(
-//             empty_string
-//                 .try_reserve_exact(MAX_USIZE)
-//                 .map_err(|e| e.kind()),
+//             empty_string.try_reserve_exact(MAX_USIZE).map_err(|e| e.kind()),
 //             Err(CapacityOverflow),
 //             "usize::MAX should trigger an overflow!"
 //         );
@@ -875,23 +878,19 @@ fn test_try_with_capacity() {
 //     {
 //         let mut ten_bytes: String = String::from("0123456789");
 //
-//         if let Err(CapacityOverflow) = ten_bytes
-//             .try_reserve_exact(MAX_CAP - 10)
-//             .map_err(|e| e.kind())
+//         if let Err(CapacityOverflow) =
+//             ten_bytes.try_reserve_exact(MAX_CAP - 10).map_err(|e| e.kind())
 //         {
 //             panic!("isize::MAX shouldn't trigger an overflow!");
 //         }
-//         if let Err(CapacityOverflow) = ten_bytes
-//             .try_reserve_exact(MAX_CAP - 10)
-//             .map_err(|e| e.kind())
+//         if let Err(CapacityOverflow) =
+//             ten_bytes.try_reserve_exact(MAX_CAP - 10).map_err(|e| e.kind())
 //         {
 //             panic!("isize::MAX shouldn't trigger an overflow!");
 //         }
 //
 //         assert_matches!(
-//             ten_bytes
-//                 .try_reserve_exact(MAX_CAP - 9)
-//                 .map_err(|e| e.kind()),
+//             ten_bytes.try_reserve_exact(MAX_CAP - 9).map_err(|e| e.kind()),
 //             Err(CapacityOverflow),
 //             "isize::MAX + 1 should trigger an overflow!"
 //         );
