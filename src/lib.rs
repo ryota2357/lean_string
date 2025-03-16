@@ -219,9 +219,10 @@ impl LeanString {
     /// ## invalid UTF-16
     ///
     /// ```
+    /// # use lean_string::LeanString;
     /// // 𝄞mu<invalid>ic
     /// let v = &[0xD834, 0xDD1E, 0x006d, 0x0075, 0xD800, 0x0069, 0x0063];
-    /// assert!(String::from_utf16(v).is_err());
+    /// assert!(LeanString::from_utf16(v).is_err());
     /// ```
     #[inline]
     pub fn from_utf16(buf: &[u16]) -> Result<Self, FromUtf16Error> {
