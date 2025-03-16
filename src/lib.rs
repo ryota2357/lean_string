@@ -92,7 +92,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if any of the following conditions is met:
+    /// Panics if **any** of the following conditions is met:
     ///
     /// - The system is out-of-memory.
     /// - On 64-bit architecture, the `capacity` is greater than `2^56 - 1`.
@@ -352,7 +352,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if any of the following conditions is met:
+    /// Panics if **any** of the following conditions is met:
     ///
     /// - The system is out-of-memory.
     /// - On 64-bit architecture, the `capacity` is greater than `2^56 - 1`.
@@ -528,7 +528,8 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// This method does not clone the [`LeanString`] without all of following conditions are true:
+    /// This method does not clone and panics the [`LeanString`] **without all** of following conditions are
+    /// true:
     ///
     /// - 32-bit architecture
     /// - The [`LeanString`] is not unique.
@@ -597,7 +598,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if any of the following conditions:
+    /// Panics if **any** of the following conditions:
     ///
     /// 1. `idx` is larger than or equal tothe [`LeanString`]'s length, or if it does not lie on a [`char`]
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
@@ -687,7 +688,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if any of the following conditions:
+    /// Panics if **any** of the following conditions:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`]
     ///    boundary.
@@ -733,7 +734,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if any of the following conditions:
+    /// Panics if **any** of the following conditions:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`] boundary.
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
@@ -839,6 +840,22 @@ impl LeanString {
     }
 }
 
+/// A [`Clone`] implementation for [`LeanString`].
+///
+/// The clone operation is performed using a reference counting mechanism, which means:
+/// - The cloned string shares the same underlying data with the original string
+/// - The cloning process is very efficient (O(1) time complexity)
+/// - No memory allocation occurs during cloning
+///
+/// # Examples
+///
+/// ```
+/// # use lean_string::LeanString;
+/// let s1 = LeanString::from("Hello, World!");
+/// let s2 = s1.clone();
+///
+/// assert_eq!(s1, s2);
+/// ```
 impl Clone for LeanString {
     #[inline]
     fn clone(&self) -> Self {
@@ -851,6 +868,13 @@ impl Clone for LeanString {
     }
 }
 
+/// A [`Drop`] implementation for [`LeanString`].
+///
+/// When the last reference to a [`LeanString`] is dropped:
+/// - If the string is heap-allocated, the heap memory is freed
+/// - The internal state is reset to an empty inline buffer
+///
+/// This ensures no memory leaks occur and all resources are properly cleaned up.
 impl Drop for LeanString {
     fn drop(&mut self) {
         self.0.replace_inner(Repr::new());
