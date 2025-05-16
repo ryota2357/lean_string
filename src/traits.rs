@@ -5,10 +5,22 @@ use core::{fmt, fmt::Write, num::NonZero};
 
 /// A trait for converting a value to a [`LeanString`].
 pub trait ToLeanString {
+    /// Converts the value to a [`LeanString`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if conversion fails. For a non-panicking version, use [`try_to_lean_string`].
+    ///
+    /// [`try_to_lean_string`]: Self::try_to_lean_string
     fn to_lean_string(&self) -> LeanString {
         self.try_to_lean_string().unwrap_with_msg()
     }
 
+    /// Attempts to convert the value to a [`LeanString`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ToLeanStringError`] if the conversion fails.
     fn try_to_lean_string(&self) -> Result<LeanString, ToLeanStringError>;
 }
 

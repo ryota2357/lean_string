@@ -32,6 +32,7 @@ pub use traits::ToLeanString;
 
 mod features;
 
+/// Compact, clone-on-write, UTF-8 encoded, growable string type.
 #[repr(transparent)]
 pub struct LeanString(Repr);
 
@@ -123,8 +124,8 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::with_capacity()`].
     ///
-    /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::with_capacity()`].
+    /// This method won't panic if the system is out of memory, or if the `capacity` is too large, but
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::with_capacity()`].
     #[inline]
     pub fn try_with_capacity(capacity: usize) -> Result<Self, ReserveError> {
         Repr::with_capacity(capacity).map(LeanString)
