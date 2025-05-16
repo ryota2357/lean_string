@@ -341,37 +341,37 @@ fn test_pop() {
 //     assert_eq!(nihon.capacity(), orig_capacity);
 // }
 
-// #[test]
-// fn test_str_truncate() {
-//     let mut s = String::from("12345");
-//     s.truncate(5);
-//     assert_eq!(s, "12345");
-//     s.truncate(3);
-//     assert_eq!(s, "123");
-//     s.truncate(0);
-//     assert_eq!(s, "");
-//
-//     let mut s = String::from("12345");
-//     let p = s.as_ptr();
-//     s.truncate(3);
-//     s.push_str("6");
-//     let p_ = s.as_ptr();
-//     assert_eq!(p_, p);
-// }
+#[test]
+fn test_str_truncate() {
+    let mut s = LeanString::from("12345");
+    s.truncate(5);
+    assert_eq!(s, "12345");
+    s.truncate(3);
+    assert_eq!(s, "123");
+    s.truncate(0);
+    assert_eq!(s, "");
 
-// #[test]
-// fn test_str_truncate_invalid_len() {
-//     let mut s = String::from("12345");
-//     s.truncate(6);
-//     assert_eq!(s, "12345");
-// }
+    let mut s = LeanString::from("12345");
+    let p = s.as_ptr();
+    s.truncate(3);
+    s.push_str("6");
+    let p_ = s.as_ptr();
+    assert_eq!(p_, p);
+}
 
-// #[test]
-// #[should_panic]
-// fn test_str_truncate_split_codepoint() {
-//     let mut s = String::from("\u{FC}"); // ü
-//     s.truncate(1);
-// }
+#[test]
+fn test_str_truncate_invalid_len() {
+    let mut s = LeanString::from("12345");
+    s.truncate(6);
+    assert_eq!(s, "12345");
+}
+
+#[test]
+#[should_panic(expected = "index is not a char boundary or out of bounds (index: 1)")]
+fn test_str_truncate_split_codepoint() {
+    let mut s = LeanString::from("\u{FC}"); // ü
+    s.truncate(1);
+}
 
 #[test]
 fn test_str_clear() {

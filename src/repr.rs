@@ -353,46 +353,10 @@ impl Repr {
         // SAFETY: We know this is a valid length which falls on a char boundary
         let new_len = self.len() - ch.len_utf8();
 
-        if self.is_heap_buffer() {
-            // SAFETY: We just checked that `self` is HeapBuffer
-            let heap = unsafe { self.as_heap_buffer_mut() };
-
-            if !heap.is_len_on_heap() {
-                // Since len is inlined and we don't modify the buffer by popping a char, it is ok
-                // to just set the new length.
-                // SAFETY: `new_len <= len <= capacity`
-                unsafe { heap.set_len(new_len) };
-            } else {
-                // See `reverse` method for the explanation of the ordering.
-                if heap.reference_count().fetch_sub(1, Release) == 1 {
-                    // `heap` is unique, we can set the new length in place.
-
-                    // See `reverse` method for the explanation of the ordering.
-                    heap.reference_count().fetch_add(1, Acquire);
-
-                    // SAFETY: `heap` is unique, we can reallocate in place.
-                    unsafe { heap.set_len(new_len) };
-                } else {
-                    // SAFETY: `ptr` is valid for `len` bytes, and `HeapBuffer` contains valid UTF-8.
-                    let str = unsafe {
-                        let ptr = self.0 as *mut u8;
-                        let slice = slice::from_raw_parts_mut(ptr, new_len);
-                        str::from_utf8_unchecked_mut(slice)
-                    };
-                    *self = Repr::from_str(str)?;
-                }
-            }
-        } else if self.is_static_buffer() {
-            // SAFETY:
-            // - We just checked that `self` is StaticBuffer
-            // - `new_len <= len <= capacity`
-            unsafe { self.as_static_buffer_mut().set_len(new_len) };
-        } else {
-            // SAFETY:
-            // - The number of types of buffer is 3, and the remaining is InlineBuffer.
-            // - From `#Safety`, `new_len <= MAX_INLINE_SIZE` is true.
-            unsafe { self.as_inline_buffer_mut().set_len(new_len) };
-        }
+        // SAFETY:
+        // - `new_len` is less than `len()` because we calculated it from `len() - ch.len_utf8()`.
+        // - `new_len` is a valid char boundary because `ch` is a valid char.
+        unsafe { self.truncate_unchecked(new_len) }?;
 
         Ok(Some(ch))
     }
@@ -513,6 +477,74 @@ impl Repr {
             // and lastly resize the string
             self.set_len(new_len);
         }
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn truncate(&mut self, new_len: usize) -> Result<(), ReserveError> {
+        if new_len >= self.len() {
+            return Ok(());
+        }
+
+        let str = self.as_str();
+        assert!(
+            str.is_char_boundary(new_len),
+            "index is not a char boundary or out of bounds (index: {new_len})",
+        );
+
+        // SAFETY: We just checked that `new_len < len()` and `new_len` is a valid char
+        unsafe { self.truncate_unchecked(new_len) }
+    }
+
+    /// # Safety
+    ///
+    /// - `new_len` must be less than or equal to `len()`
+    /// - `new_len` must be a valid char boundary.
+    unsafe fn truncate_unchecked(&mut self, new_len: usize) -> Result<(), ReserveError> {
+        debug_assert!(new_len <= self.len());
+        debug_assert!(self.as_str().is_char_boundary(new_len));
+
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked that `self` is HeapBuffer
+            let heap = unsafe { self.as_heap_buffer_mut() };
+
+            if !heap.is_len_on_heap() {
+                // Since len is inlined and we don't modify the buffer by popping a char, it is ok
+                // to just set the new length.
+                // SAFETY: `new_len <= len <= capacity`
+                unsafe { heap.set_len(new_len) };
+            } else {
+                // See `reverse` method for the explanation of the ordering.
+                if heap.reference_count().fetch_sub(1, Release) == 1 {
+                    // `heap` is unique, we can set the new length in place.
+
+                    // See `reverse` method for the explanation of the ordering.
+                    heap.reference_count().fetch_add(1, Acquire);
+
+                    // SAFETY: `heap` is unique, we can reallocate in place.
+                    unsafe { heap.set_len(new_len) };
+                } else {
+                    // SAFETY: `ptr` is valid for `len` bytes, and `HeapBuffer` contains valid UTF-8.
+                    let str = unsafe {
+                        let ptr = self.0 as *mut u8;
+                        let slice = slice::from_raw_parts_mut(ptr, new_len);
+                        str::from_utf8_unchecked_mut(slice)
+                    };
+                    *self = Repr::from_str(str)?;
+                }
+            }
+        } else if self.is_static_buffer() {
+            // SAFETY:
+            // - We just checked that `self` is StaticBuffer
+            // - `new_len <= len <= capacity`
+            unsafe { self.as_static_buffer_mut().set_len(new_len) };
+        } else {
+            // SAFETY:
+            // - The number of types of buffer is 3, and the remaining is InlineBuffer.
+            // - From `#Safety`, `new_len <= MAX_INLINE_SIZE` is true.
+            unsafe { self.as_inline_buffer_mut().set_len(new_len) };
+        }
+
         Ok(())
     }
 

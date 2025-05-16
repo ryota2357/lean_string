@@ -202,6 +202,10 @@ fn pop_share_buffer() {
 
     // buffer is shared
     assert_eq!(s.as_ptr(), s2.as_ptr());
+
+    // modify makes a new buffer
+    s2.push('0');
+    assert_ne!(s.as_ptr(), s2.as_ptr());
 }
 
 #[test]
@@ -366,6 +370,76 @@ fn insert_to_static() {
 fn insert_fail() {
     let mut s = LeanString::from("012345");
     s.insert(7, 'a');
+}
+
+#[test]
+fn truncate_keep_capacity() {
+    let mut inline = LeanString::from("abcdef");
+
+    assert!(!inline.is_heap_allocated());
+    inline.truncate(3);
+    assert_eq!(inline, "abc");
+    assert_eq!(inline.len(), 3);
+    assert!(!inline.is_heap_allocated());
+    assert_eq!(inline.capacity(), INLINE_LIMIT);
+
+    let mut heap = LeanString::from("a".repeat(INLINE_LIMIT + 10).as_str());
+    let original_capacity = heap.capacity();
+    assert!(heap.is_heap_allocated());
+
+    heap.truncate(INLINE_LIMIT + 1);
+    assert_eq!(heap, "a".repeat(INLINE_LIMIT + 1));
+    assert_eq!(heap.len(), INLINE_LIMIT + 1);
+    assert!(heap.is_heap_allocated());
+    assert_eq!(heap.capacity(), original_capacity);
+
+    heap.truncate(1);
+    assert_eq!(heap, "a");
+    assert_eq!(heap.len(), 1);
+    assert!(heap.is_heap_allocated());
+    assert_eq!(heap.capacity(), original_capacity);
+}
+
+#[test]
+fn truncate_from_static() {
+    let mut static_ = LeanString::from_static_str("abcdefghijklmnopqrstuvwxyz");
+    assert_eq!(static_.len(), 26);
+    assert!(!static_.is_heap_allocated());
+
+    static_.truncate(20);
+    assert_eq!(static_, "abcdefghijklmnopqrst");
+    assert_eq!(static_.len(), 20);
+    assert_eq!(static_.capacity(), 20);
+    assert!(!static_.is_heap_allocated());
+}
+
+#[test]
+fn truncate_share_buffer() {
+    // s is inlined
+    let mut s = LeanString::from("abcdefgh");
+    assert_eq!(s.len(), 8);
+
+    let mut s1 = s.clone();
+    s1.truncate(4);
+    assert_eq!(s1, "abcd");
+    assert_eq!(s1.len(), 4);
+
+    // s is not changed
+    assert_eq!(s, "abcdefgh");
+
+    // s into heap
+    s.push_str("ijklmnopqrstuvwxyz");
+    assert_eq!(s.len(), 26);
+    assert!(s.is_heap_allocated());
+
+    // buffer is shared
+    let mut s2 = s.clone();
+    s2.truncate(20);
+    assert_eq!(s.as_ptr(), s2.as_ptr());
+
+    // modify makes a new buffer
+    s2.push('0');
+    assert_ne!(s.as_ptr(), s2.as_ptr());
 }
 
 #[test]

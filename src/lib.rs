@@ -769,6 +769,49 @@ impl LeanString {
         self.0.insert_str(idx, string)
     }
 
+    /// Shortens a [`LeanString`] to the specified length.
+    ///
+    /// If `new_len` is greater than or equal to the string's current length, this has no effect.
+    ///
+    /// # Panics
+    ///
+    /// Panics if **any** of the following conditions is met:
+    ///
+    /// 1. `new_len` does not lie on a [`char`] boundary.
+    /// 2. The system is out-of-memory when cloning the [`LeanString`].
+    ///
+    /// For 2, If you want to handle such a problem manually, use [`LeanString::try_truncate()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut s = LeanString::from("hello");
+    /// s.truncate(2);
+    /// assert_eq!(s, "he");
+    ///
+    /// // Truncating to a larger length does nothing:
+    /// s.truncate(10);
+    /// assert_eq!(s, "he");
+    /// ```
+    #[inline]
+    pub fn truncate(&mut self, new_len: usize) {
+        self.try_truncate(new_len).unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanString::truncate()`].
+    ///
+    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// Otherwise it behaves the same as [`LeanString::truncate()`].
+    ///
+    /// # Panics
+    ///
+    /// This method still panics if `new_len` does not lie on a [`char`] boundary.
+    #[inline]
+    pub fn try_truncate(&mut self, new_len: usize) -> Result<(), ReserveError> {
+        self.0.truncate(new_len)
+    }
+
     /// Reduces the length of the [`LeanString`] to zero.
     ///
     /// If the [`LeanString`] is unique, this method will not change the capacity.
