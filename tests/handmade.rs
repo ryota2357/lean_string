@@ -390,7 +390,7 @@ fn clear_cow() {
     inline.clear();
     assert_eq!(inline, "");
 
-    let mut heap: LeanString = core::iter::repeat('a').take(100).collect();
+    let mut heap: LeanString = core::iter::repeat_n('a', 100).collect();
     let cloned = heap.clone();
     heap.clear();
 
