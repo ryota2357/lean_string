@@ -17,10 +17,7 @@ mod static_buffer;
 use static_buffer::StaticBuffer;
 
 mod last_byte;
-#[cfg(not(feature = "last_byte"))]
 use last_byte::LastByte;
-#[cfg(feature = "last_byte")]
-pub use last_byte::LastByte;
 
 mod num_to_repr;
 use num_to_repr::NumToRepr;

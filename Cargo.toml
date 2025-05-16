@@ -13,7 +13,6 @@ categories = ["data-structures", "no-std"]
 [features]
 default = ["std"]
 std = []
-last_byte = []
 
 [dependencies]
 itoa = "1.0"

@@ -228,54 +228,6 @@ pub enum LastByte {
 
     HeapMarker = 0xD0,
     StaticMarker = 0xD1,
-
-    #[cfg(feature = "last_byte")] Unused00_1101_0010 = 0xD2,
-    #[cfg(feature = "last_byte")] Unused01_1101_0011 = 0xD3,
-    #[cfg(feature = "last_byte")] Unused02_1101_0100 = 0xD4,
-    #[cfg(feature = "last_byte")] Unused03_1101_0101 = 0xD5,
-    #[cfg(feature = "last_byte")] Unused04_1101_0110 = 0xD6,
-    #[cfg(feature = "last_byte")] Unused05_1101_0111 = 0xD7,
-    #[cfg(feature = "last_byte")] Unused06_1101_1000 = 0xD8,
-    #[cfg(feature = "last_byte")] Unused07_1101_1001 = 0xD9,
-    #[cfg(feature = "last_byte")] Unused08_1101_1010 = 0xDA,
-    #[cfg(feature = "last_byte")] Unused09_1101_1011 = 0xDB,
-    #[cfg(feature = "last_byte")] Unused10_1101_1100 = 0xDC,
-    #[cfg(feature = "last_byte")] Unused11_1101_1101 = 0xDD,
-    #[cfg(feature = "last_byte")] Unused12_1101_1110 = 0xDE,
-    #[cfg(feature = "last_byte")] Unused13_1101_1111 = 0xDF,
-    #[cfg(feature = "last_byte")] Unused14_1110_0000 = 0xE0,
-    #[cfg(feature = "last_byte")] Unused15_1110_0001 = 0xE1,
-    #[cfg(feature = "last_byte")] Unused16_1110_0010 = 0xE2,
-    #[cfg(feature = "last_byte")] Unused17_1110_0011 = 0xE3,
-    #[cfg(feature = "last_byte")] Unused18_1110_0100 = 0xE4,
-    #[cfg(feature = "last_byte")] Unused19_1110_0101 = 0xE5,
-    #[cfg(feature = "last_byte")] Unused20_1110_0110 = 0xE6,
-    #[cfg(feature = "last_byte")] Unused21_1110_0111 = 0xE7,
-    #[cfg(feature = "last_byte")] Unused22_1110_1000 = 0xE8,
-    #[cfg(feature = "last_byte")] Unused23_1110_1001 = 0xE9,
-    #[cfg(feature = "last_byte")] Unused24_1110_1010 = 0xEA,
-    #[cfg(feature = "last_byte")] Unused25_1110_1011 = 0xEB,
-    #[cfg(feature = "last_byte")] Unused26_1110_1100 = 0xEC,
-    #[cfg(feature = "last_byte")] Unused27_1110_1101 = 0xED,
-    #[cfg(feature = "last_byte")] Unused28_1110_1110 = 0xEE,
-    #[cfg(feature = "last_byte")] Unused29_1110_1111 = 0xEF,
-    #[cfg(feature = "last_byte")] Unused30_1111_0000 = 0xF0,
-    #[cfg(feature = "last_byte")] Unused31_1111_0001 = 0xF1,
-    #[cfg(feature = "last_byte")] Unused32_1111_0010 = 0xF2,
-    #[cfg(feature = "last_byte")] Unused33_1111_0011 = 0xF3,
-    #[cfg(feature = "last_byte")] Unused34_1111_0100 = 0xF4,
-    #[cfg(feature = "last_byte")] Unused35_1111_0101 = 0xF5,
-    #[cfg(feature = "last_byte")] Unused36_1111_0110 = 0xF6,
-    #[cfg(feature = "last_byte")] Unused37_1111_0111 = 0xF7,
-    #[cfg(feature = "last_byte")] Unused38_1111_1000 = 0xF8,
-    #[cfg(feature = "last_byte")] Unused39_1111_1001 = 0xF9,
-    #[cfg(feature = "last_byte")] Unused40_1111_1010 = 0xFA,
-    #[cfg(feature = "last_byte")] Unused41_1111_1011 = 0xFB,
-    #[cfg(feature = "last_byte")] Unused42_1111_1100 = 0xFC,
-    #[cfg(feature = "last_byte")] Unused43_1111_1101 = 0xFD,
-    #[cfg(feature = "last_byte")] Unused44_1111_1110 = 0xFE,
-    // Nich optimization for Option<LastByte>
-    // Free45_1111_1111 = 0xFF,
 }
 
 fn _static_assert() {
@@ -310,66 +262,6 @@ mod tests {
         gen_case! {
             00, 01, 02, 03, 04, 05, 06, 07,
             08, 09, 10, 11, 12, 13, 14, 15,
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "last_byte")]
-    fn unused_variant_name_check() {
-        macro_rules! gen_case {
-            ($( $free:ident $binary:literal ),* $(,)?) => {$(
-                paste! {
-                    let raw_value = LastByte::[<$free _ $binary>] as u8;
-                    assert_eq!(raw_value, [<0b0 $binary>]);
-                }
-            )*};
-        }
-        gen_case! {
-            Unused00 1101_0010,
-            Unused01 1101_0011,
-            Unused02 1101_0100,
-            Unused03 1101_0101,
-            Unused04 1101_0110,
-            Unused05 1101_0111,
-            Unused06 1101_1000,
-            Unused07 1101_1001,
-            Unused08 1101_1010,
-            Unused09 1101_1011,
-            Unused10 1101_1100,
-            Unused11 1101_1101,
-            Unused12 1101_1110,
-            Unused13 1101_1111,
-            Unused14 1110_0000,
-            Unused15 1110_0001,
-            Unused16 1110_0010,
-            Unused17 1110_0011,
-            Unused18 1110_0100,
-            Unused19 1110_0101,
-            Unused20 1110_0110,
-            Unused21 1110_0111,
-            Unused22 1110_1000,
-            Unused23 1110_1001,
-            Unused24 1110_1010,
-            Unused25 1110_1011,
-            Unused26 1110_1100,
-            Unused27 1110_1101,
-            Unused28 1110_1110,
-            Unused29 1110_1111,
-            Unused30 1111_0000,
-            Unused31 1111_0001,
-            Unused32 1111_0010,
-            Unused33 1111_0011,
-            Unused34 1111_0100,
-            Unused35 1111_0101,
-            Unused36 1111_0110,
-            Unused37 1111_0111,
-            Unused38 1111_1000,
-            Unused39 1111_1001,
-            Unused40 1111_1010,
-            Unused41 1111_1011,
-            Unused42 1111_1100,
-            Unused43 1111_1101,
-            Unused44 1111_1110,
         }
     }
 }

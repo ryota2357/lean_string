@@ -24,9 +24,6 @@ use std::ffi::OsStr;
 mod repr;
 use repr::Repr;
 
-#[cfg(feature = "last_byte")]
-pub use repr::LastByte;
-
 mod errors;
 pub use errors::*;
 
