@@ -261,52 +261,31 @@ impl Repr {
         let new_capacity = heap.len().max(min_capacity);
         let old_capacity = heap.capacity();
 
-        if new_capacity <= MAX_INLINE_SIZE {
+        let new_repr = if new_capacity <= MAX_INLINE_SIZE {
             // We can convert the HeapBuffer to InlineBuffer.
-
             // SAFETY:
             // `heap.len() <= new_capacity` and `new_capacity <= MAX_INLINE_SIZE`
             // thus, `heap.len() <= MAX_INLINE_SIZE`
-            let inline = unsafe {
-                let str = heap.as_str();
-                InlineBuffer::new(str)
-            };
-
-            // Same as Arc::drop. See `replace_inner` method for the explanation of the ordering.
-            if heap.reference_count().fetch_sub(1, Release) == 1 {
-                // only the current thread has the reference, we can deallocate the buffer.
-
-                // See `replace_inner` method for the explanation of the ordering.
-                fence(Acquire);
-
-                // SAFETY: The old value of `fetch_sub` was `1`, so now it is `0`. And we used
-                // `Acquire` fence to be sure that `reference count becomes 0` happens-before the
-                // drop.
-                unsafe { heap.dealloc() };
-            }
-
-            *self = Repr::from_inline(inline);
+            let inline = unsafe { InlineBuffer::new(heap.as_str()) };
+            Repr::from_inline(inline)
+        } else if new_capacity >= old_capacity {
+            // No need to shrink the buffer.
             return Ok(());
-        }
-
-        // No need to shrink the buffer.
-        if new_capacity >= old_capacity {
-            return Ok(());
-        }
-
-        if heap.is_unique() {
+        } else if heap.is_unique() {
             // Try to extend the buffer in place.
             // SAFETY: `heap` is unique, and `new_capacity < old_capacity`
             unsafe { heap.realloc(new_capacity)? };
-            Ok(())
+            return Ok(());
         } else {
             // We need to create a new buffer because the current buffer is shared with others.
             let str = heap.as_str();
             let additional = new_capacity - str.len();
             let new_heap = HeapBuffer::with_additional(str, additional)?;
-            self.replace_inner(Repr::from_heap(new_heap));
-            Ok(())
-        }
+            Repr::from_heap(new_heap)
+        };
+
+        self.replace_inner(new_repr);
+        Ok(())
     }
 
     #[inline]
