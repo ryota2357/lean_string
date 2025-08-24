@@ -62,6 +62,124 @@ fn from_around_inline_limit_static() {
 }
 
 #[test]
+fn shrink_to_inline_buffer() {
+    let mut inline = LeanString::from("Hello");
+    assert!(!inline.is_heap_allocated());
+    assert_eq!(inline.capacity(), INLINE_LIMIT);
+
+    inline.shrink_to(100);
+    assert_eq!(inline, "Hello");
+    assert_eq!(inline.capacity(), INLINE_LIMIT);
+    assert!(!inline.is_heap_allocated());
+
+    inline.shrink_to(3);
+    assert_eq!(inline, "Hello");
+    assert_eq!(inline.capacity(), INLINE_LIMIT);
+    assert!(!inline.is_heap_allocated());
+}
+
+#[test]
+fn shrink_to_static_buffer() {
+    let text: &'static str = "A static str that is longer than inline limit";
+    let mut static_ = LeanString::from_static_str(text);
+    assert!(!static_.is_heap_allocated());
+
+    static_.shrink_to(30);
+    assert_eq!(static_.capacity(), text.len());
+    assert!(!static_.is_heap_allocated());
+
+    static_.shrink_to(10);
+    assert_eq!(static_.capacity(), text.len());
+    assert!(!static_.is_heap_allocated());
+}
+
+#[test]
+fn shrink_to_heap_buffer() {
+    let text = "A heap allocated string that is longer than inline limit";
+    let mut heap = LeanString::from(text);
+    assert!(heap.is_heap_allocated());
+    let original_capacity = heap.capacity();
+
+    heap.shrink_to(100);
+    assert_eq!(heap.capacity(), original_capacity);
+    assert_eq!(heap, text);
+    assert!(heap.is_heap_allocated());
+
+    heap.shrink_to(30);
+    assert_eq!(heap.capacity(), original_capacity);
+    assert_eq!(heap, text);
+    assert!(heap.is_heap_allocated());
+
+    heap.shrink_to(0);
+    assert_eq!(heap.capacity(), heap.len());
+    assert_eq!(heap, text);
+    assert!(heap.is_heap_allocated());
+}
+
+#[test]
+fn shrink_to_heap_to_inline() {
+    let mut heap = LeanString::with_capacity(100);
+    heap.push_str("Hello");
+    assert!(heap.is_heap_allocated());
+    assert_eq!(heap.capacity(), 100);
+    assert!(heap.len() < INLINE_LIMIT);
+
+    heap.shrink_to(100);
+    assert_eq!(heap.capacity(), 100);
+    assert_eq!(heap, "Hello");
+
+    heap.shrink_to(120);
+    assert_eq!(heap.capacity(), 100);
+
+    heap.shrink_to(50);
+    assert_eq!(heap.capacity(), 50);
+    assert_eq!(heap, "Hello");
+    assert!(heap.is_heap_allocated());
+
+    heap.shrink_to(INLINE_LIMIT);
+    assert_eq!(heap.capacity(), INLINE_LIMIT);
+    assert_eq!(heap, "Hello");
+    assert!(!heap.is_heap_allocated());
+
+    heap.shrink_to(0);
+    assert_eq!(heap.capacity(), INLINE_LIMIT);
+    assert_eq!(heap, "Hello");
+    assert!(!heap.is_heap_allocated());
+}
+
+#[test]
+fn shrink_to_cow_shared_buffer() {
+    let mut heap1 = LeanString::with_capacity(100);
+    heap1.push_str("Shared");
+
+    let mut heap2 = heap1.clone();
+    assert_eq!(heap1.as_ptr(), heap2.as_ptr());
+
+    heap1.shrink_to(50);
+    assert_eq!(heap1.capacity(), 50);
+    assert_eq!(heap1, "Shared");
+
+    assert_eq!(heap2.capacity(), 100);
+    assert_eq!(heap2, "Shared");
+
+    assert_ne!(heap1.as_ptr(), heap2.as_ptr());
+
+    let heap3 = heap2.clone();
+    assert_eq!(heap2.as_ptr(), heap3.as_ptr());
+
+    heap2.shrink_to(0); // = shrink_to_fit
+    assert_eq!(heap2.capacity(), INLINE_LIMIT);
+    assert_eq!(heap2, "Shared");
+    assert!(!heap2.is_heap_allocated());
+
+    assert_eq!(heap3.capacity(), 100);
+    assert_eq!(heap3, "Shared");
+    assert!(heap3.is_heap_allocated());
+
+    assert_ne!(heap2.as_ptr(), heap3.as_ptr());
+}
+
+#[test]
 fn push_cow() {
     let mut s = LeanString::new();
     s.push('a');
