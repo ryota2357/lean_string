@@ -304,7 +304,7 @@ impl Repr {
             let str = heap.as_str();
             let additional = new_capacity - str.len();
             let new_heap = HeapBuffer::with_additional(str, additional)?;
-            *self = Repr::from_heap(new_heap);
+            self.replace_inner(Repr::from_heap(new_heap));
             Ok(())
         }
     }
