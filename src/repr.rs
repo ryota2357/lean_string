@@ -32,14 +32,12 @@ pub(crate) struct Repr(*const (), [u8; 7], LastByte);
 #[cfg(target_pointer_width = "32")]
 pub(crate) struct Repr(*const (), [u8; 3], LastByte);
 
-fn _static_assert() {
-    const {
-        assert!(size_of::<Repr>() == MAX_INLINE_SIZE);
-        assert!(size_of::<Option<Repr>>() == MAX_INLINE_SIZE);
-        assert!(align_of::<Repr>() == align_of::<usize>());
-        assert!(align_of::<Option<Repr>>() == align_of::<usize>());
-    }
-}
+const _: () = {
+    assert!(size_of::<Repr>() == MAX_INLINE_SIZE);
+    assert!(size_of::<Option<Repr>>() == MAX_INLINE_SIZE);
+    assert!(align_of::<Repr>() == align_of::<usize>());
+    assert!(align_of::<Option<Repr>>() == align_of::<usize>());
+};
 
 impl Repr {
     #[inline]

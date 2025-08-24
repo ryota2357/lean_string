@@ -8,6 +8,11 @@ pub(super) struct InlineBuffer([u8; MAX_INLINE_SIZE]);
 #[repr(C, align(4))]
 pub(super) struct InlineBuffer([u8; MAX_INLINE_SIZE]);
 
+const _: () = {
+    assert!(size_of::<InlineBuffer>() == MAX_INLINE_SIZE);
+    assert!(align_of::<InlineBuffer>() == align_of::<usize>());
+};
+
 impl InlineBuffer {
     /// # Safety
     /// `text` must have a length less than or equal to `MAX_INLINE_SIZE`.

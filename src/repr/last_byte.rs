@@ -230,12 +230,10 @@ pub enum LastByte {
     StaticMarker = 0xD1,
 }
 
-fn _static_assert() {
-    const {
-        assert!(size_of::<LastByte>() == 1);
-        assert!(size_of::<Option<LastByte>>() == 1);
-    }
-}
+const _: () = {
+    assert!(size_of::<LastByte>() == 1);
+    assert!(size_of::<Option<LastByte>>() == 1);
+};
 
 #[allow(dead_code)]
 impl LastByte {

@@ -6,6 +6,11 @@ pub(super) struct StaticBuffer {
     len: usize, // stored as little-endian
 }
 
+const _: () = {
+    assert!(size_of::<StaticBuffer>() == MAX_INLINE_SIZE);
+    assert!(align_of::<StaticBuffer>() == align_of::<usize>());
+};
+
 const USIZE_SIZE: usize = size_of::<usize>();
 
 impl StaticBuffer {

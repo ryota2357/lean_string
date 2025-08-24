@@ -36,14 +36,12 @@ mod features;
 #[repr(transparent)]
 pub struct LeanString(Repr);
 
-fn _static_assert() {
-    const {
-        assert!(size_of::<LeanString>() == 2 * size_of::<usize>());
-        assert!(size_of::<Option<LeanString>>() == 2 * size_of::<usize>());
-        assert!(align_of::<LeanString>() == align_of::<usize>());
-        assert!(align_of::<Option<LeanString>>() == align_of::<usize>());
-    }
-}
+const _: () = {
+    assert!(size_of::<LeanString>() == size_of::<[usize; 2]>());
+    assert!(size_of::<Option<LeanString>>() == size_of::<[usize; 2]>());
+    assert!(align_of::<LeanString>() == align_of::<usize>());
+    assert!(align_of::<Option<LeanString>>() == align_of::<usize>());
+};
 
 impl LeanString {
     /// Creates a new empty [`LeanString`].

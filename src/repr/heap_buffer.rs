@@ -34,12 +34,10 @@ struct Header {
     capacity: Capacity,
 }
 
-fn _static_assert() {
-    const {
-        assert!(size_of::<HeapBuffer>() == MAX_INLINE_SIZE);
-        assert!(align_of::<HeapBuffer>() == align_of::<usize>());
-    }
-}
+const _: () = {
+    assert!(size_of::<HeapBuffer>() == MAX_INLINE_SIZE);
+    assert!(align_of::<HeapBuffer>() == align_of::<usize>());
+};
 
 impl HeapBuffer {
     pub(super) fn new(text: &str) -> Result<Self, ReserveError> {
