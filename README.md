@@ -19,6 +19,8 @@ Compact, clone-on-write string.
   - When a `LeanString` is cloned, the heap buffer is shared.
   - When a `LeanString` is mutated, the heap buffer is copied if it is shared.
 - `O(1)`, zero allocation construction from `&'static str`.
+- Heap based string grows at a rate of 1.5x
+  - The std library String grows at a rate of 2x
 - Nich optimized for `Option<LeanString>`.
   - `size_of::<Option<LeanString>>() == size_of::<LeanString>()`
 - High API compatibility for `String`.
