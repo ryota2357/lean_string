@@ -139,3 +139,9 @@ fn bool_to_lean_string() {
 fn char_to_lean_string(c: char) {
     prop_assert_eq!(c.to_lean_string(), c.to_string());
 }
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn string_to_lean_string(s: String) {
+    prop_assert_eq!(s.to_lean_string(), s);
+}
