@@ -72,7 +72,7 @@ macro_rules! test_integer_to_lean_string {
             #[test]
             fn [<$ty _to_lean_string>]() {
                 for num in <$ty>::MIN..=<$ty>::MAX {
-                    let lean = num.to_string();
+                    let lean = num.to_lean_string();
                     let string = num.to_string();
                     assert_eq!(lean, string);
                 }
@@ -82,7 +82,7 @@ macro_rules! test_integer_to_lean_string {
                 for num in <$ty>::MIN..=<$ty>::MAX {
                     if num == 0 { continue };
                     let num = core::num::NonZero::<$ty>::new(num).unwrap();
-                    let lean = num.to_string();
+                    let lean = num.to_lean_string();
                     let string = num.to_string();
                     assert_eq!(lean, string);
                 }
