@@ -474,7 +474,7 @@ impl LeanString {
     /// assert_eq!(s.capacity(), 50);
     ///
     /// // if the string can be inlined, it is
-    /// s.shrink_to(10);
+    /// s.shrink_to(5);
     /// assert_eq!(s.capacity(), 2 * size_of::<usize>());
     /// ```
     #[inline]
