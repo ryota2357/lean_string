@@ -412,6 +412,7 @@ impl Repr {
         }
 
         impl Drop for SetLenOnDrop<'_> {
+            #[inline]
             fn drop(&mut self) {
                 // SAFETY:
                 // - `dst_idx <= src_idx`, and `src_idx <= len`, so `dst_idx <= len`.

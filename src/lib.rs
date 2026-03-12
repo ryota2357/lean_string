@@ -916,6 +916,7 @@ impl Clone for LeanString {
 ///
 /// This ensures no memory leaks occur and all resources are properly cleaned up.
 impl Drop for LeanString {
+    #[inline]
     fn drop(&mut self) {
         self.0.replace_inner(Repr::new());
     }
