@@ -112,7 +112,7 @@ impl Repr {
             .min(MAX_INLINE_SIZE);
 
         let mut len = {
-            // SAFETY:`Repr` is same size of [usize; 2], and aligned as usize
+            // SAFETY: `Repr` has the same size as `[usize; 2]` and is aligned as `usize`
             let tail = unsafe {
                 let ptr = (self as *const _ as *const usize).add(1);
                 usize::from_le(*ptr)
