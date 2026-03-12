@@ -105,6 +105,12 @@ impl Repr {
     #[cfg(target_pointer_width = "64")]
     #[inline]
     pub(crate) fn len(&self) -> usize {
+        let last_byte = self.last_byte();
+
+        let inline_len = (last_byte as usize)
+            .wrapping_sub(LastByte::MASK_1100_0000 as usize)
+            .min(MAX_INLINE_SIZE);
+
         let mut len = {
             // SAFETY:`Repr` is same size of [usize; 2], and aligned as usize
             let tail = unsafe {
@@ -113,12 +119,6 @@ impl Repr {
             };
             tail & (usize::MAX >> 8)
         };
-
-        let last_byte = self.last_byte();
-
-        let inline_len = (last_byte as usize)
-            .wrapping_sub(LastByte::MASK_1100_0000 as usize)
-            .min(MAX_INLINE_SIZE);
 
         // This code is compiled to a single branchless instruction, such as `cmov`
         if last_byte < LastByte::HeapMarker as u8 {
