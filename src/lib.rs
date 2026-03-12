@@ -1276,6 +1276,23 @@ impl fmt::Write for LeanString {
         self.push_str(s);
         Ok(())
     }
+
+    #[inline]
+    fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        match args.as_str() {
+            Some(s) => {
+                if self.is_empty() && !self.is_heap_allocated() {
+                    // Since self is empty inline buffer or empty static buffer, constructing a new
+                    // one with `from_static_str` is more efficient since it is O(1).
+                    *self = LeanString::from_static_str(s);
+                } else {
+                    self.push_str(s);
+                }
+                Ok(())
+            }
+            None => fmt::write(self, args),
+        }
+    }
 }
 
 impl Add<&str> for LeanString {
