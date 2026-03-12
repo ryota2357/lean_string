@@ -107,12 +107,11 @@ impl Repr {
     pub(crate) fn len(&self) -> usize {
         let mut len = {
             // SAFETY:`Repr` is same size of [usize; 2], and aligned as usize
-            let mut tail_bytes = unsafe {
-                let tail = (self as *const _ as *const usize).add(1);
-                *(tail as *const [u8; 8])
+            let tail = unsafe {
+                let ptr = (self as *const _ as *const usize).add(1);
+                usize::from_le(*ptr)
             };
-            tail_bytes[7] = 0;
-            usize::from_le_bytes(tail_bytes)
+            tail & (usize::MAX >> 8)
         };
 
         let last_byte = self.last_byte();
