@@ -4,6 +4,7 @@ use serde::de::{Deserializer, Error, Unexpected, Visitor};
 
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde::Serialize for LeanString {
+    #[inline]
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.as_str().serialize(serializer)
     }
@@ -11,6 +12,7 @@ impl serde::Serialize for LeanString {
 
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde::Deserialize<'de> for LeanString {
+    #[inline]
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct LeanStringVisitor;
 
