@@ -1,17 +1,20 @@
 use crate::LeanString;
 use core::{fmt, str};
-use serde::de::{Deserializer, Error, Unexpected, Visitor};
+use serde_core::{
+    de::{Deserialize, Deserializer, Error, Unexpected, Visitor},
+    ser::{Serialize, Serializer},
+};
 
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-impl serde::Serialize for LeanString {
+impl Serialize for LeanString {
     #[inline]
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.as_str().serialize(serializer)
     }
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-impl<'de> serde::Deserialize<'de> for LeanString {
+impl<'de> Deserialize<'de> for LeanString {
     #[inline]
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct LeanStringVisitor;
@@ -32,17 +35,13 @@ impl<'de> serde::Deserialize<'de> for LeanString {
             }
 
             fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Self::Value, E> {
-                match str::from_utf8(v) {
-                    Ok(s) => Ok(LeanString::from(s)),
-                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
-                }
+                LeanString::from_utf8(v)
+                    .map_err(|_| Error::invalid_value(Unexpected::Bytes(v), &self))
             }
 
             fn visit_borrowed_bytes<E: Error>(self, v: &'de [u8]) -> Result<Self::Value, E> {
-                match str::from_utf8(v) {
-                    Ok(s) => Ok(LeanString::from(s)),
-                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
-                }
+                LeanString::from_utf8(v)
+                    .map_err(|_| Error::invalid_value(Unexpected::Bytes(v), &self))
             }
         }
 
