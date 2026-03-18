@@ -217,9 +217,25 @@ impl HeapBuffer {
         Ok(())
     }
 
+    /// Decrements the reference count. If this was the last reference, deallocates the buffer.
+    ///
+    /// After calling this method, `self` must not be accessed. The caller is responsible for
+    /// overwriting `self` or ensuring no further use occurs.
+    pub(super) fn release(&mut self) {
+        // Same as `Arc::drop`: `fetch_sub(1, Release)` ensures all prior accesses from other
+        // threads are visible before we might deallocate.
+        if self.reference_count().fetch_sub(1, Release) == 1 {
+            // And the `Acquire` fence ensures we see all writes before freeing the memory.
+            fence(Acquire);
+
+            // SAFETY: The old value of `fetch_sub` was `1`, so now it is `0`. no other references exist.
+            unsafe { self.dealloc() };
+        }
+    }
+
     /// # Safety
     /// The reference count must be 0.
-    pub(super) unsafe fn dealloc(&mut self) {
+    unsafe fn dealloc(&mut self) {
         let layout = match HeapBuffer::layout_from_capacity(self.header().capacity) {
             Ok(layout) => layout,
             Err(_) => {

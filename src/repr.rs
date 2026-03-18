@@ -209,11 +209,10 @@ impl Repr {
                 // (ref count unchanged), then create a new independent buffer.
                 let str = heap.as_str();
                 let new_heap = HeapBuffer::with_additional(str, additional)?;
-                // `replace_inner` decrements the old buffer's ref count after the copy is complete.
-                // This ensures: (1) no use-after-free (we read before releasing our ref), and
-                // (2) no ref count leak on allocation failure (the `?` above returns before
-                // `replace_inner` is reached, leaving the ref count untouched).
-                self.replace_inner(Repr::from_heap(new_heap));
+                // Release our reference only after the copy is complete. If the allocation above
+                // fails, ref count remains untouched (no leak).
+                heap.release();
+                *self = Repr::from_heap(new_heap);
             }
             Ok(())
         } else if self.is_static_buffer() {
@@ -254,30 +253,28 @@ impl Repr {
         let new_capacity = heap.len().max(min_capacity);
         let old_capacity = heap.capacity();
 
-        let new_repr = if new_capacity <= MAX_INLINE_SIZE {
+        if new_capacity <= MAX_INLINE_SIZE {
             // We can convert the HeapBuffer to InlineBuffer.
             // SAFETY:
             // `heap.len() <= new_capacity` and `new_capacity <= MAX_INLINE_SIZE`
             // thus, `heap.len() <= MAX_INLINE_SIZE`
             let inline = unsafe { InlineBuffer::new(heap.as_str()) };
-            Repr::from_inline(inline)
+            self.replace_inner(Repr::from_inline(inline));
         } else if new_capacity >= old_capacity {
             // No need to shrink the buffer.
-            return Ok(());
         } else if heap.is_unique() {
             // Try to extend the buffer in place.
             // SAFETY: `heap` is unique, and `new_capacity < old_capacity`
             unsafe { heap.realloc(new_capacity)? };
-            return Ok(());
         } else {
             // We need to create a new buffer because the current buffer is shared with others.
             let str = heap.as_str();
             let additional = new_capacity - str.len();
             let new_heap = HeapBuffer::with_additional(str, additional)?;
-            Repr::from_heap(new_heap)
+            heap.release();
+            *self = Repr::from_heap(new_heap);
         };
 
-        self.replace_inner(new_repr);
         Ok(())
     }
 
@@ -572,22 +569,7 @@ impl Repr {
         if self.is_heap_buffer() {
             // SAFETY: We just checked the discriminant to make sure we're heap allocated
             let heap = unsafe { self.as_heap_buffer_mut() };
-
-            // Same as Arc::drop.
-            // Because `fetch_sub` is already atomic, we should use `Release` ordering to avoid
-            // unexpected drop of the buffer and to ensure that the buffer is unique.
-            if heap.reference_count().fetch_sub(1, Release) == 1 {
-                // only the current thread has the reference, we can deallocate the buffer.
-
-                // We need to wait for the reference count decrement to complete before
-                // deallocating the buffer.
-                fence(Acquire);
-
-                // SAFETY: The old value of `fetch_sub` was `1`, so now it is `0`. And we used
-                // `Acquire` fence to be sure that `reference count becomes 0` happens-before the
-                // drop.
-                unsafe { heap.dealloc() };
-            }
+            heap.release();
         }
 
         *self = other;
