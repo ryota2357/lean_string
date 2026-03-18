@@ -193,17 +193,7 @@ impl Repr {
             // SAFETY: We just checked that `self` is HeapBuffer
             let heap = unsafe { self.as_heap_buffer_mut() };
 
-            // Because `fetch_sub` is already atomic, we should use `Release` ordering to avoid
-            // unexpected drop of the buffer and to ensure that the buffer is unique.
-            if heap.reference_count().fetch_sub(1, Release) == 1 {
-                // `heap` is unique, we can reallocate in place.
-
-                // We need to rollback the reference count.
-                // We should use `Acquire` ordering to prevent reordering of the reallocation and
-                // the reference count increment.
-                // This is a same meaning of `fence(Acquire); fech_add(1, Relaxed);`
-                heap.reference_count().fetch_add(1, Acquire);
-
+            if heap.is_unique() {
                 if heap.capacity() >= needed_capacity {
                     // No need to reserve more capacity.
                     return Ok(());
@@ -211,15 +201,19 @@ impl Repr {
 
                 let amortized_capacity = heap_buffer::amortized_growth(len, additional);
                 // SAFETY:
-                // - `heap` is unique.
+                // - `heap` is unique (verified by `is_unique()`).
                 // - `amortized_capacity` is greater than `len`.
                 unsafe { heap.realloc(amortized_capacity)? };
             } else {
-                // heap is shared, we need to reallocate a new buffer.
-                // We already decremented the reference count, no need to touch it again.
+                // The heap is shared. We must read the data while our reference is still live
+                // (ref count unchanged), then create a new independent buffer.
                 let str = heap.as_str();
                 let new_heap = HeapBuffer::with_additional(str, additional)?;
-                *self = Repr::from_heap(new_heap);
+                // `replace_inner` decrements the old buffer's ref count after the copy is complete.
+                // This ensures: (1) no use-after-free (we read before releasing our ref), and
+                // (2) no ref count leak on allocation failure (the `?` above returns before
+                // `replace_inner` is reached, leaving the ref count untouched).
+                self.replace_inner(Repr::from_heap(new_heap));
             }
             Ok(())
         } else if self.is_static_buffer() {
