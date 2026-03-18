@@ -40,7 +40,7 @@ impl StaticBuffer {
         Ok(Self { ptr, len })
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(super) const fn len(&self) -> usize {
         let len = self.len ^ Self::TAG;
         let bytes = len.to_ne_bytes();
         usize::from_le_bytes(bytes)
