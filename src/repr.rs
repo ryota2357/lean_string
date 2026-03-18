@@ -104,12 +104,14 @@ impl Repr {
 
     #[cfg(target_pointer_width = "64")]
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         let last_byte = self.last_byte();
 
-        let inline_len = (last_byte as usize)
-            .wrapping_sub(LastByte::MASK_1100_0000 as usize)
-            .min(MAX_INLINE_SIZE);
+        let inline_len = {
+            let this = (last_byte as usize).wrapping_sub(LastByte::MASK_1100_0000 as usize);
+            // inline Ord::min because the trait impl is not const
+            if MAX_INLINE_SIZE < this { MAX_INLINE_SIZE } else { this }
+        };
 
         let mut len = {
             // SAFETY: `Repr` has the same size as `[usize; 2]` and is aligned as `usize`
@@ -130,7 +132,7 @@ impl Repr {
 
     #[cfg(target_pointer_width = "32")]
     #[inline]
-    pub(crate) fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         if self.is_heap_buffer() {
             // SAFETY: We just checked the discriminant to make sure we're heap allocated
             unsafe { self.as_heap_buffer() }.len()
@@ -139,14 +141,17 @@ impl Repr {
             unsafe { self.as_static_buffer() }.len()
         } else {
             // Remaining is InlineBuffer
-            (self.last_byte() as usize)
-                .wrapping_sub(LastByte::MASK_1100_0000 as usize)
-                .min(MAX_INLINE_SIZE)
+            {
+                let this =
+                    (self.last_byte() as usize).wrapping_sub(LastByte::MASK_1100_0000 as usize);
+                // inline Ord::min because the trait impl is not const
+                if MAX_INLINE_SIZE < this { MAX_INLINE_SIZE } else { this }
+            }
         }
     }
 
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -164,13 +169,13 @@ impl Repr {
     }
 
     #[inline]
-    pub(crate) fn as_str(&self) -> &str {
+    pub(crate) const fn as_str(&self) -> &str {
         // SAFETY: A `Repr` contains valid UTF-8
         unsafe { str::from_utf8_unchecked(self.as_bytes()) }
     }
 
     #[inline]
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    pub(crate) const fn as_bytes(&self) -> &[u8] {
         let len = self.len();
 
         let ptr = if self.last_byte() >= LastByte::HeapMarker as u8 {
@@ -571,7 +576,7 @@ impl Repr {
     }
 
     #[inline(always)]
-    pub(crate) fn is_heap_buffer(&self) -> bool {
+    pub(crate) const fn is_heap_buffer(&self) -> bool {
         self.last_byte() == LastByte::HeapMarker as u8
     }
 
@@ -700,7 +705,7 @@ impl Repr {
     }
 
     #[inline(always)]
-    unsafe fn as_heap_buffer(&self) -> &HeapBuffer {
+    const unsafe fn as_heap_buffer(&self) -> &HeapBuffer {
         // SAFETY: A `Repr` is transmuted from `HeapBuffer`
         unsafe { &*(self as *const _ as *const HeapBuffer) }
     }
@@ -712,7 +717,7 @@ impl Repr {
     }
 
     #[inline(always)]
-    unsafe fn as_static_buffer(&self) -> &StaticBuffer {
+    const unsafe fn as_static_buffer(&self) -> &StaticBuffer {
         // SAFETY: A `Repr` is transmuted from `StaticBuffer`
         unsafe { &*(self as *const _ as *const StaticBuffer) }
     }

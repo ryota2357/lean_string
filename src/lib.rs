@@ -264,7 +264,7 @@ impl LeanString {
     /// assert_eq!(fancy_f.chars().count(), 3);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
@@ -281,7 +281,7 @@ impl LeanString {
     /// assert!(!s.is_empty());
     /// ```
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
@@ -323,7 +323,7 @@ impl LeanString {
     /// assert_eq!(s.as_str(), "foo");
     /// ```
     #[inline]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
 
@@ -337,7 +337,7 @@ impl LeanString {
     /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
     /// ```
     #[inline]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
 

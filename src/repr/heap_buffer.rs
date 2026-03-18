@@ -109,9 +109,9 @@ impl HeapBuffer {
         self.ptr
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(super) const fn len(&self) -> usize {
         #[cold]
-        fn len_on_heap(ptr: NonNull<u8>) -> usize {
+        const fn len_on_heap(ptr: NonNull<u8>) -> usize {
             // SAFETY: We just checked that `len` is stored on the heap.
             unsafe {
                 let len_ptr = ptr.sub(HeapBuffer::header_offset()).sub(size_of::<usize>());
@@ -449,7 +449,7 @@ mod internal {
             return self.0 == Self::ON_THE_HEAP;
         }
 
-        pub(super) fn as_usize(self) -> usize {
+        pub(super) const fn as_usize(self) -> usize {
             let size = self.0 ^ Self::TAG;
             let bytes = size.to_ne_bytes();
             usize::from_le_bytes(bytes)
