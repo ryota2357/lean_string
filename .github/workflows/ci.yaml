@@ -92,3 +92,8 @@ jobs:
 
       - name: Test (all-features)
         run: cargo +nightly miri test --target ${{ matrix.target }} --all-features
+
+      - name: Test (race condition)
+        env:
+          MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-preemption-rate=1"
+        run: cargo +nightly miri test --target ${{ matrix.target }} --test race_condition
