@@ -596,17 +596,14 @@ impl Repr {
             // SAFETY: we just checked self is HeapBuffer
             let heap = unsafe { self.as_heap_buffer_mut() };
 
-            // See `reverse` method for the explanation of the ordering.
-            if heap.reference_count().fetch_sub(1, Release) == 1 {
-                // `heap` is unique, we can modify it in place.
-
-                // See `reverse` method for the explanation of the ordering.
-                heap.reference_count().fetch_add(1, Acquire);
-            } else {
-                // SAFETY: `heap` is shared, we need to create a new buffer.
+            if !heap.is_unique() {
+                // `heap` is shared, we need to create a new buffer.
                 let str = heap.as_str();
                 let new_heap = HeapBuffer::new(str)?;
+                heap.release();
                 *self = Repr::from_heap(new_heap);
+            } else {
+                // `heap` is unique, we can modify it in place.
             }
         } else if self.is_static_buffer() {
             // StaticBuffer is immutable, need to convert to other buffer.
