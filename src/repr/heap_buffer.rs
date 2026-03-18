@@ -105,6 +105,10 @@ impl HeapBuffer {
         self.header().capacity.as_usize()
     }
 
+    pub(crate) fn ptr(&self) -> NonNull<u8> {
+        self.ptr
+    }
+
     pub(super) fn len(&self) -> usize {
         #[cold]
         fn len_on_heap(ptr: NonNull<u8>) -> usize {

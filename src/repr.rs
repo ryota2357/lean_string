@@ -481,25 +481,20 @@ impl Repr {
                 // to just set the new length.
                 // SAFETY: `new_len <= len <= capacity`
                 unsafe { heap.set_len(new_len) };
+            } else if heap.is_unique() {
+                // SAFETY: `heap` is unique, we can set the new length in place.
+                unsafe { heap.set_len(new_len) };
             } else {
-                // See `reverse` method for the explanation of the ordering.
-                if heap.reference_count().fetch_sub(1, Release) == 1 {
-                    // `heap` is unique, we can set the new length in place.
-
-                    // See `reverse` method for the explanation of the ordering.
-                    heap.reference_count().fetch_add(1, Acquire);
-
-                    // SAFETY: `heap` is unique, we can reallocate in place.
-                    unsafe { heap.set_len(new_len) };
-                } else {
-                    // SAFETY: `ptr` is valid for `len` bytes, and `HeapBuffer` contains valid UTF-8.
-                    let str = unsafe {
-                        let ptr = self.0 as *mut u8;
-                        let slice = slice::from_raw_parts_mut(ptr, new_len);
-                        str::from_utf8_unchecked_mut(slice)
-                    };
-                    *self = Repr::from_str(str)?;
-                }
+                // SAFETY: `heap.ptr` is valid for `new_len` bytes, and `HeapBuffer` contains
+                // valid UTF-8. Use the pointer directly to avoid a len read from the heap header.
+                let str = unsafe {
+                    let ptr = heap.ptr().as_ptr();
+                    let slice = slice::from_raw_parts(ptr, new_len);
+                    str::from_utf8_unchecked(slice)
+                };
+                let new_repr = Repr::from_str(str)?;
+                heap.release();
+                *self = new_repr;
             }
         } else if self.is_static_buffer() {
             // SAFETY:
