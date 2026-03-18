@@ -2,47 +2,36 @@
 #![cfg(loom)]
 
 use lean_string::LeanString;
-use loom::{thread, thread::JoinHandle};
-use paste::paste;
+use loom::thread;
 
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-macro_rules! test_model {
-    (
-        run: $run:block
-        fn $name:ident( $($arg:ident : $aty:ty),* $(,)? ) $(-> $ret:ty)? $body:block
-    ) => {
-        paste! {
-            #[test]
-            fn [<run_ $name _model>]() {
-                loom::model(|| {
-                    let _profiler = dhat::Profiler::builder().testing().build();
-                    $run
-                    let stats = dhat::HeapStats::get();
-                    // https://github.com/tokio-rs/loom/issues/369
-                    dhat::assert_eq!(stats.curr_blocks, 1);
-                })
-            }
+macro_rules! loom_test {
+    (fn $name:ident() { $($tt:tt)* }) => {
+        #[test]
+        fn $name() {
+            loom::model(|| {
+                let _profiler = dhat::Profiler::builder().testing().build();
+                {
+                    $($tt)*
+                }
+                let stats = dhat::HeapStats::get();
+                // https://github.com/tokio-rs/loom/issues/369
+                dhat::assert_eq!(stats.curr_blocks, 1);
+            });
         }
-        fn $name( $($arg : $aty),* ) $(-> $ret)? {
-            $body
-        }
-    }
+    };
 }
 
-test_model! {
-    run: {
-        push2().join().unwrap();
-    }
-    fn push2() -> JoinHandle<()> {
+loom_test! {
+    fn concurrent_push() {
         let mut one = LeanString::from("12345678901234567890");
         let two = one.clone();
 
         let th = thread::spawn(move || {
             let mut three = two.clone();
             three.push('a');
-
             assert_eq!(two, "12345678901234567890");
             assert_eq!(three, "12345678901234567890a");
         });
@@ -50,15 +39,12 @@ test_model! {
         one.push('a');
         assert_eq!(one, "12345678901234567890a");
 
-        th
+        th.join().unwrap();
     }
 }
 
-test_model! {
-    run: {
-        remove2().join().unwrap();
-    }
-    fn remove2() -> JoinHandle<()> {
+loom_test! {
+    fn concurrent_remove() {
         let mut one = LeanString::from("abcdefghijklmnopqrstuvwxyz");
         let two = one.clone();
 
@@ -72,6 +58,6 @@ test_model! {
         assert_eq!(one.remove(3), 'd');
         assert_eq!(one, "abcefghijklmnopqrstuvwxyz");
 
-        th
+        th.join().unwrap();
     }
 }
