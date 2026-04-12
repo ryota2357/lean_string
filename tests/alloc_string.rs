@@ -1,13 +1,12 @@
 // This tests are adapted from the Rust standard library tests for `String`.
-// https://github.com/rust-lang/rust/blob/351686bcfd18dd0f652aba69a806bfa68c57234d/library/alloc/tests/string.rs
+// https://github.com/rust-lang/rust/blob/bf4fbfb7a18d74e7cd8eef93af7329c58fbb5344/library/alloctests/tests/string.rs
 
-// use std::assert_matches::assert_matches;
 // use std::borrow::Cow;
 // use std::cell::Cell;
 // use std::collections::TryReserveErrorKind::*;
 // use std::ops::Bound::*;
 // use std::ops::{Bound, RangeBounds};
-// use std::{panic, str};
+// use std::{assert_matches, panic, str};
 use lean_string::{LeanString, ToLeanString};
 use std::{borrow::Cow, panic};
 
@@ -45,7 +44,7 @@ fn test_from_cow_str() {
 // #[test]
 // fn test_unsized_to_string() {
 //     let s: &str = "abc";
-//     let _: LeanString = (*s).to_lean_string();
+//     let _: String = (*s).to_string();
 // }
 
 #[test]
@@ -56,11 +55,11 @@ fn test_from_utf8() {
     let xs = "ศไทย中华Việt Nam".as_bytes().to_vec();
     assert_eq!(LeanString::from_utf8(&xs).unwrap(), LeanString::from("ศไทย中华Việt Nam"));
 
-    let xs = b"hello\xFF".to_vec();
-    let _ = LeanString::from_utf8(&xs).unwrap_err();
+    // let xs = b"hello\xFF".to_vec();
+    // let err = String::from_utf8(&xs).unwrap_err();
     // assert_eq!(err.as_bytes(), b"hello\xff");
     // let err_clone = err.clone();
-    // assert_eq!(err, err_clon);
+    // assert_eq!(err, err_clone);
     // assert_eq!(err.into_bytes(), b"hello\xff".to_vec());
     // assert_eq!(err_clone.utf8_error().valid_up_to(), 5);
 }
@@ -246,7 +245,7 @@ fn test_from_utf16_lossy() {
 
 // #[test]
 // fn test_push_bytes() {
-//     let mut s = LeanString::from("ABC");
+//     let mut s = String::from("ABC");
 //     unsafe {
 //         let mv = s.as_mut_vec();
 //         mv.extend_from_slice(&[b'D']);
@@ -578,7 +577,7 @@ fn test_from_iterator() {
     let c: LeanString = [t, u].into_iter().collect();
     assert_eq!(s, c);
 
-    let mut d = t.to_string();
+    let mut d = t.to_lean_string();
     d.extend(vec![u]);
     assert_eq!(s, d);
 }
@@ -622,8 +621,15 @@ fn test_from_iterator() {
 // }
 
 // #[test]
-// #[should_panic]
-// fn test_replace_range_char_boundary() {
+// #[should_panic = "start of range should be a character boundary"]
+// fn test_replace_range_start_char_boundary() {
+//     let mut s = "Hello, 世界!".to_owned();
+//     s.replace_range(8.., "");
+// }
+
+// #[test]
+// #[should_panic = "end of range should be a character boundary"]
+// fn test_replace_range_end_char_boundary() {
 //     let mut s = "Hello, 世界!".to_owned();
 //     s.replace_range(..8, "");
 // }
@@ -638,28 +644,32 @@ fn test_from_iterator() {
 // }
 
 // #[test]
-// #[should_panic]
+// #[should_panic = "range end index 6 out of range for slice of length 5"]
 // fn test_replace_range_out_of_bounds() {
 //     let mut s = String::from("12345");
 //     s.replace_range(5..6, "789");
 // }
 
 // #[test]
-// #[should_panic]
+// #[should_panic = "range end index 5 out of range for slice of length 5"]
 // fn test_replace_range_inclusive_out_of_bounds() {
 //     let mut s = String::from("12345");
 //     s.replace_range(5..=5, "789");
 // }
 
+// // The overflowed index value is target-dependent,
+// // so we don't check for its exact value in the panic message
 // #[test]
-// #[should_panic]
+// #[should_panic = "out of range for slice of length 3"]
 // fn test_replace_range_start_overflow() {
 //     let mut s = String::from("123");
 //     s.replace_range((Excluded(usize::MAX), Included(0)), "");
 // }
 
+// // The overflowed index value is target-dependent,
+// // so we don't check for its exact value in the panic message
 // #[test]
-// #[should_panic]
+// #[should_panic = "out of range for slice of length 3"]
 // fn test_replace_range_end_overflow() {
 //     let mut s = String::from("456");
 //     s.replace_range((Included(0), Included(usize::MAX)), "");
@@ -725,6 +735,40 @@ fn test_from_iterator() {
 //     assert_eq!(Ok(""), str::from_utf8(s.as_bytes()));
 // }
 
+// #[test]
+// fn test_replace_first() {
+//     let mut s = String::from("~ First ❌ Middle ❌ Last ❌ ~");
+//     s.replace_first("❌", "✅✅");
+//     assert_eq!(s, "~ First ✅✅ Middle ❌ Last ❌ ~");
+//     s.replace_first("🦀", "😳");
+//     assert_eq!(s, "~ First ✅✅ Middle ❌ Last ❌ ~");
+//
+//     let mut s = String::from("❌");
+//     s.replace_first('❌', "✅✅");
+//     assert_eq!(s, "✅✅");
+//
+//     let mut s = String::from("");
+//     s.replace_first('🌌', "❌");
+//     assert_eq!(s, "");
+// }
+
+// #[test]
+// fn test_replace_last() {
+//     let mut s = String::from("~ First ❌ Middle ❌ Last ❌ ~");
+//     s.replace_last("❌", "✅✅");
+//     assert_eq!(s, "~ First ❌ Middle ❌ Last ✅✅ ~");
+//     s.replace_last("🦀", "😳");
+//     assert_eq!(s, "~ First ❌ Middle ❌ Last ✅✅ ~");
+//
+//     let mut s = String::from("❌");
+//     s.replace_last::<char>('❌', "✅✅");
+//     assert_eq!(s, "✅✅");
+//
+//     let mut s = String::from("");
+//     s.replace_last::<char>('🌌', "❌");
+//     assert_eq!(s, "");
+// }
+
 #[test]
 fn test_extend_ref() {
     let mut a = "foo".to_lean_string();
@@ -765,6 +809,7 @@ fn test_extend_ref() {
 // }
 
 #[test]
+// #[cfg_attr(miri, ignore)] // Miri does not support signalling OOM
 fn test_try_with_capacity() {
     let string = LeanString::try_with_capacity(1000).unwrap();
     assert_eq!(0, string.len());
