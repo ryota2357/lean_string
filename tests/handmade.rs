@@ -491,6 +491,54 @@ fn insert_fail() {
 }
 
 #[test]
+fn repeat_inline() {
+    let s = LeanString::from("ab");
+    assert!(!s.is_heap_allocated());
+
+    assert_eq!(s.repeat(0), "");
+    assert!(!s.repeat(0).is_heap_allocated());
+
+    assert_eq!(s.repeat(1), "ab");
+
+    let repeated = s.repeat(INLINE_LIMIT);
+    assert_eq!(repeated, "ab".repeat(INLINE_LIMIT));
+    assert!(repeated.is_heap_allocated());
+}
+
+#[test]
+fn repeat_heap() {
+    let s = LeanString::from("a".repeat(INLINE_LIMIT + 1).as_str());
+    assert!(s.is_heap_allocated());
+
+    assert_eq!(s.repeat(0), "");
+    assert!(!s.repeat(0).is_heap_allocated());
+
+    let r1 = s.repeat(1);
+    assert_eq!(r1, s);
+    assert_eq!(r1.as_ptr(), s.as_ptr()); // n == 1 returns clone
+
+    let repeated = s.repeat(2);
+    assert_eq!(repeated.len(), s.len() * 2);
+    assert_eq!(repeated.capacity(), s.len() * 2);
+    assert!(repeated.is_heap_allocated());
+}
+
+#[test]
+fn repeat_empty() {
+    let empty = LeanString::new();
+    assert_eq!(empty.repeat(0), "");
+    assert_eq!(empty.repeat(1), "");
+    assert_eq!(empty.repeat(100), "");
+}
+
+#[test]
+#[should_panic(expected = "Cannot allocate memory to hold LeanString")]
+fn repeat_overflow() {
+    let s = LeanString::from("ab");
+    let _ = s.repeat(usize::MAX);
+}
+
+#[test]
 fn truncate_keep_capacity() {
     let mut inline = LeanString::from("abcdef");
 

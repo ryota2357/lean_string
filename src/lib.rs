@@ -767,6 +767,53 @@ impl LeanString {
         self.0.insert_str(idx, string)
     }
 
+    /// Creates a new [`LeanString`] by repeating `self` `n` times.
+    ///
+    /// # Panics
+    ///
+    /// Panics if **any** of the following conditions is met:
+    ///
+    /// 1. The resulting capacity would overflow (`self.len() * n` exceeds `usize::MAX`).
+    /// 2. The system is out-of-memory.
+    /// 3. On 64-bit architecture, the resulting length is greater than `2^56 - 1`.
+    ///    On 32-bit architecture, it is `2^32 - 1`.
+    ///
+    /// If you want to handle such a problem manually, use [`LeanString::try_repeat()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let s = LeanString::from("abc");
+    /// assert_eq!(s.repeat(4), "abcabcabcabc");
+    /// assert_eq!(s.repeat(0), "");
+    /// ```
+    #[inline]
+    pub fn repeat(&self, n: usize) -> Self {
+        self.try_repeat(n).unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanString::repeat()`].
+    ///
+    /// This method won't panic, but returns a [`ReserveError`] if the capacity would overflow,
+    /// the system is out-of-memory, or the resulting length exceeds the maximum. Otherwise it
+    /// behaves the same as [`LeanString::repeat()`].
+    #[inline]
+    pub fn try_repeat(&self, n: usize) -> Result<Self, ReserveError> {
+        if n == 0 || self.is_empty() {
+            Ok(LeanString::new())
+        } else if n == 1 {
+            Ok(self.clone())
+        } else {
+            let capacity = self.len().checked_mul(n).ok_or(ReserveError)?;
+            let mut res = LeanString::try_with_capacity(capacity)?;
+            for _ in 0..n {
+                res.try_push_str(self)?;
+            }
+            Ok(res)
+        }
+    }
+
     /// Shortens a [`LeanString`] to the specified length.
     ///
     /// If `new_len` is greater than or equal to the string's current length, this has no effect.
