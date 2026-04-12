@@ -298,48 +298,48 @@ fn test_pop() {
     assert_eq!(data, "ประเทศไทย中");
 }
 
-// #[test]
-// fn test_split_off_empty() {
-//     let orig = "Hello, world!";
-//     let mut split = String::from(orig);
-//     let empty: String = split.split_off(orig.len());
-//     assert!(empty.is_empty());
-// }
+#[test]
+fn test_split_off_empty() {
+    let orig = "Hello, world!";
+    let mut split = LeanString::from(orig);
+    let empty: LeanString = split.split_off(orig.len());
+    assert!(empty.is_empty());
+}
 
-// #[test]
-// #[should_panic]
-// fn test_split_off_past_end() {
-//     let orig = "Hello, world!";
-//     let mut split = String::from(orig);
-//     let _ = split.split_off(orig.len() + 1);
-// }
+#[test]
+#[should_panic]
+fn test_split_off_past_end() {
+    let orig = "Hello, world!";
+    let mut split = LeanString::from(orig);
+    let _ = split.split_off(orig.len() + 1);
+}
 
-// #[test]
-// #[should_panic]
-// fn test_split_off_mid_char() {
-//     let mut shan = String::from("山");
-//     let _broken_mountain = shan.split_off(1);
-// }
+#[test]
+#[should_panic]
+fn test_split_off_mid_char() {
+    let mut shan = LeanString::from("山");
+    let _broken_mountain = shan.split_off(1);
+}
 
-// #[test]
-// fn test_split_off_ascii() {
-//     let mut ab = String::from("ABCD");
-//     let orig_capacity = ab.capacity();
-//     let cd = ab.split_off(2);
-//     assert_eq!(ab, "AB");
-//     assert_eq!(cd, "CD");
-//     assert_eq!(ab.capacity(), orig_capacity);
-// }
+#[test]
+fn test_split_off_ascii() {
+    let mut ab = LeanString::from("ABCD");
+    let orig_capacity = ab.capacity();
+    let cd = ab.split_off(2);
+    assert_eq!(ab, "AB");
+    assert_eq!(cd, "CD");
+    assert_eq!(ab.capacity(), orig_capacity);
+}
 
-// #[test]
-// fn test_split_off_unicode() {
-//     let mut nihon = String::from("日本語");
-//     let orig_capacity = nihon.capacity();
-//     let go = nihon.split_off("日本".len());
-//     assert_eq!(nihon, "日本");
-//     assert_eq!(go, "語");
-//     assert_eq!(nihon.capacity(), orig_capacity);
-// }
+#[test]
+fn test_split_off_unicode() {
+    let mut nihon = LeanString::from("日本語");
+    let orig_capacity = nihon.capacity();
+    let go = nihon.split_off("日本".len());
+    assert_eq!(nihon, "日本");
+    assert_eq!(go, "語");
+    assert_eq!(nihon.capacity(), orig_capacity);
+}
 
 #[test]
 fn test_str_truncate() {

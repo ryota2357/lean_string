@@ -810,6 +810,53 @@ impl LeanString {
         self.0.truncate(new_len)
     }
 
+    /// Splits the string into two at the given byte index.
+    ///
+    /// Returns a newly allocated [`LeanString`]. `self` contains bytes `[0, at)`, and
+    /// the returned [`LeanString`] contains bytes `[at, len)`. `at` must be on the
+    /// boundary of a UTF-8 code point.
+    ///
+    /// # Panics
+    ///
+    /// Panics if **any** of the following conditions is met:
+    ///
+    /// 1. `at` does not lie on a [`char`] boundary, or is beyond the end of the string.
+    /// 2. The system is out-of-memory when creating the new [`LeanString`].
+    ///
+    /// For 2, if you want to handle such a problem manually, use [`LeanString::try_split_off()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut hello = LeanString::from("Hello, World!");
+    /// let world = hello.split_off(7);
+    /// assert_eq!(hello, "Hello, ");
+    /// assert_eq!(world, "World!");
+    /// ```
+    #[inline]
+    #[must_use = "use `.truncate()` if you don't need the other half"]
+    pub fn split_off(&mut self, at: usize) -> Self {
+        self.try_split_off(at).unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanString::split_off()`].
+    ///
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
+    /// Otherwise it behaves the same as [`LeanString::split_off()`].
+    ///
+    /// # Panics
+    ///
+    /// This method still panics if `at` does not lie on a [`char`] boundary, or is beyond the
+    /// end of the string.
+    #[inline]
+    #[must_use = "use `.try_truncate()` if you don't need the other half"]
+    pub fn try_split_off(&mut self, at: usize) -> Result<Self, ReserveError> {
+        let other = Repr::from_str(&self.as_str()[at..])?;
+        self.try_truncate(at)?;
+        Ok(LeanString(other))
+    }
+
     /// Reduces the length of the [`LeanString`] to zero.
     ///
     /// If the [`LeanString`] is unique, this method will not change the capacity.
