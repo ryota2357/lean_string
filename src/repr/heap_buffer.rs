@@ -428,7 +428,7 @@ mod internal {
         const ON_THE_HEAP: usize = {
             let mut bytes = [255; USIZE_SIZE];
             bytes[USIZE_SIZE - 1] = LastByte::HeapMarker as u8;
-            usize::from_le_bytes(bytes)
+            usize::from_ne_bytes(bytes)
         };
 
         pub(super) const fn new(size: usize) -> Result<Self, ReserveError> {
@@ -495,4 +495,17 @@ mod internal {
     // - https://github.com/rust-lang/libs-team/issues/510
     #[cold]
     pub(super) fn cold_path() {}
+
+    #[cfg(all(test, target_pointer_width = "32"))]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn heap_stored_length_preserves_repr_tag() {
+            let len = TextLen::new(MAX_LEN + 1).unwrap();
+
+            assert!(len.is_heap());
+            assert_eq!(len.0.to_ne_bytes()[USIZE_SIZE - 1], LastByte::HeapMarker as u8);
+        }
+    }
 }
