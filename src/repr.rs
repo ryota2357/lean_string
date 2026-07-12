@@ -189,12 +189,25 @@ impl Repr {
         unsafe { slice::from_raw_parts(ptr, len) }
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn reserve(&mut self, additional: usize) -> Result<(), ReserveError> {
         let len = self.len();
-        let Some(needed_capacity) = len.checked_add(additional) else {
-            return reserve_overflow();
-        };
+        let needed_capacity = len.checked_add(additional).ok_or(ReserveError)?;
+
+        macro_rules! outline {
+            (($this:ident = self : $self_ty:ty $(, $var:ident : $ty:ty)* $(,)?) $(: $ret:ty)? $body:block) => {{
+                #[cold]
+                #[inline(never)]
+                fn outlined_impl($this: $self_ty, $($var: $ty),*) $(-> $ret)? $body
+                outlined_impl(self, $($var),*)
+            }};
+            (($($var:ident : $ty:ty),* $(,)?) $(: $ret:ty)? $body:block) => {{
+                #[cold]
+                #[inline(never)]
+                fn outlined_impl($($var: $ty),*) $(-> $ret)? $body
+                outlined_impl($($var),*)
+            }};
+        }
 
         if self.is_heap_buffer() {
             // SAFETY: We just checked that `self` is HeapBuffer
@@ -206,19 +219,62 @@ impl Repr {
                     return Ok(());
                 }
 
-                // SAFETY: We just verified that `heap` is unique, and `len` was read from `self`.
-                unsafe { reserve_unique_heap(heap, len, additional) }
+                outline!((heap: &mut HeapBuffer, len: usize, additional: usize): Result<(), ReserveError> {
+                    let amortized_capacity = heap_buffer::amortized_growth(len, additional);
+                    // SAFETY:
+                    // - `heap` is unique (verified by `is_unique()`).
+                    // - `amortized_capacity` is greater than `len`.
+                    unsafe { heap.realloc(amortized_capacity) }
+                })
             } else {
-                // SAFETY: We identified `self` as a heap buffer above.
-                unsafe { reserve_shared_heap(self, additional) }
+                // The heap is shared. We must read the data while our reference is still live
+                // (ref count unchanged), then create a new independent buffer.
+
+                outline!((this = self: &mut Repr, additional: usize): Result<(), ReserveError> {
+                    // NOTE: We want to make this args for `outline!`, but `this` is a mutable reference so we can't do that.
+                    // SAFETY: `this` is comes from `self`, we checked `self` is HeapBuffer.
+                    let heap = unsafe { this.as_heap_buffer_mut() };
+
+                    let str = heap.as_str();
+                    let new_heap = HeapBuffer::with_additional(str, additional)?;
+                    // Release our reference only after the copy is complete. If the allocation above
+                    // fails, ref count remains untouched (no leak).
+                    // SAFETY: `this` is overwritten immediately below and `heap` is not accessed again.
+                    unsafe { heap.release() };
+                    *this = Repr::from_heap(new_heap);
+                    Ok(())
+                })
             }
         } else if self.is_static_buffer() {
-            reserve_static(self, additional, needed_capacity)
-        } else if needed_capacity <= MAX_INLINE_SIZE {
-            // An inline buffer already has enough capacity.
-            Ok(())
+            // We can't modify it, need to convert to other buffer.
+
+            if needed_capacity <= MAX_INLINE_SIZE {
+                outline!((this = self: &mut Repr): Result<(), ReserveError> {
+                    // SAFETY: `len <= needed_capacity <= MAX_INLINE_SIZE`
+                    let inline = unsafe { InlineBuffer::new(this.as_str()) };
+                    *this = Repr::from_inline(inline);
+                    Ok(())
+                })
+            } else {
+                outline!((this = self: &mut Repr, additional: usize): Result<(), ReserveError> {
+                    let heap = HeapBuffer::with_additional(this.as_str(), additional)?;
+                    *this = Repr::from_heap(heap);
+                    Ok(())
+                })
+            }
         } else {
-            reserve_inline(self, additional)
+            // self is InlineBuffer
+
+            if needed_capacity > MAX_INLINE_SIZE {
+                outline!((this = self: &mut Repr, additional: usize): Result<(), ReserveError> {
+                    let heap = HeapBuffer::with_additional(this.as_str(), additional)?;
+                    *this = Repr::from_heap(heap);
+                    Ok(())
+                })
+            } else {
+                // We have enough capacity, no need to reserve.
+                Ok(())
+            }
         }
     }
 
@@ -701,69 +757,4 @@ impl Repr {
         // SAFETY: A `Repr` is transmuted from `StaticBuffer`
         unsafe { &mut *(self as *mut _ as *mut StaticBuffer) }
     }
-}
-
-#[cold]
-#[inline(never)]
-fn reserve_overflow() -> Result<(), ReserveError> {
-    Err(ReserveError)
-}
-
-#[cold]
-#[inline(never)]
-/// # Safety
-///
-/// `heap` must be unique, and `len` must equal its current length.
-unsafe fn reserve_unique_heap(
-    heap: &mut HeapBuffer,
-    len: usize,
-    additional: usize,
-) -> Result<(), ReserveError> {
-    let amortized_capacity = heap_buffer::amortized_growth(len, additional);
-    // SAFETY:
-    // - The caller verified that `heap` is unique.
-    // - `amortized_capacity` is greater than `len`.
-    unsafe { heap.realloc(amortized_capacity) }
-}
-
-#[cold]
-#[inline(never)]
-/// # Safety
-///
-/// `repr` must contain a live heap buffer.
-unsafe fn reserve_shared_heap(repr: &mut Repr, additional: usize) -> Result<(), ReserveError> {
-    // SAFETY: Guaranteed by the caller.
-    let heap = unsafe { repr.as_heap_buffer_mut() };
-    // Read the data while our counted reference is still live, then create an independent buffer.
-    let new_heap = HeapBuffer::with_additional(heap.as_str(), additional)?;
-    // Release our reference only after the copy is complete. If allocation fails, the reference
-    // count remains untouched. The caller immediately overwrites the old `Repr` and does not use
-    // `heap` again.
-    // SAFETY: `repr` is overwritten immediately below and `heap` is not accessed again.
-    unsafe { heap.release() };
-    *repr = Repr::from_heap(new_heap);
-    Ok(())
-}
-
-#[cold]
-#[inline(never)]
-fn reserve_static(
-    repr: &mut Repr,
-    additional: usize,
-    needed_capacity: usize,
-) -> Result<(), ReserveError> {
-    *repr = if needed_capacity <= MAX_INLINE_SIZE {
-        // SAFETY: `repr.len() <= needed_capacity <= MAX_INLINE_SIZE`.
-        Repr::from_inline(unsafe { InlineBuffer::new(repr.as_str()) })
-    } else {
-        Repr::from_heap(HeapBuffer::with_additional(repr.as_str(), additional)?)
-    };
-    Ok(())
-}
-
-#[cold]
-#[inline(never)]
-fn reserve_inline(repr: &mut Repr, additional: usize) -> Result<(), ReserveError> {
-    *repr = Repr::from_heap(HeapBuffer::with_additional(repr.as_str(), additional)?);
-    Ok(())
 }
