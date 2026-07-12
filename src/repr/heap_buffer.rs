@@ -90,6 +90,8 @@ impl HeapBuffer {
         Ok(buffer)
     }
 
+    #[cold]
+    #[inline(never)]
     pub(super) fn with_additional(text: &str, additional: usize) -> Result<Self, ReserveError> {
         let text_len = text.len();
 
@@ -283,6 +285,7 @@ impl HeapBuffer {
         }
     }
 
+    #[inline(always)]
     pub(super) fn is_unique(&self) -> bool {
         self.header().count.load(Acquire) == 1
     }
