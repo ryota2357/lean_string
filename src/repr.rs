@@ -8,7 +8,7 @@ use core::sync::atomic::{Ordering::*, fence};
 use loom::sync::atomic::{Ordering::*, fence};
 
 mod heap_buffer;
-use heap_buffer::HeapBuffer;
+use heap_buffer::GrowableHeapBuffer as HeapBuffer;
 
 mod inline_buffer;
 use inline_buffer::InlineBuffer;
