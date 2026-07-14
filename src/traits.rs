@@ -1,4 +1,7 @@
-use crate::{LeanString, ToLeanStringError, UnwrapWithMsg, repr::Repr};
+use crate::{
+    LeanString, ToLeanStringError, UnwrapWithMsg,
+    repr::{Mutable, Repr},
+};
 use alloc::string::String;
 use castaway::{LifetimeFree, match_type};
 use core::{fmt, fmt::Write, num::NonZero};
@@ -78,4 +81,4 @@ impl<T: fmt::Display> ToLeanString for T {
 // - `LeanString` does not contain any lifetime parameter.
 // These two conditions are also applied to `Repr` which is the only field of `LeanString`.
 unsafe impl LifetimeFree for LeanString {}
-unsafe impl LifetimeFree for Repr {}
+unsafe impl LifetimeFree for Repr<Mutable> {}

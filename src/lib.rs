@@ -22,7 +22,7 @@ use alloc::{borrow::Cow, boxed::Box, string::String};
 use std::ffi::OsStr;
 
 mod repr;
-use repr::Repr;
+use repr::{Mutable, Repr};
 
 mod errors;
 pub use errors::*;
@@ -34,7 +34,7 @@ mod features;
 
 /// Compact, clone-on-write, UTF-8 encoded, growable string type.
 #[repr(transparent)]
-pub struct LeanString(Repr);
+pub struct LeanString(Repr<Mutable>);
 
 const _: () = {
     assert!(size_of::<LeanString>() == size_of::<[usize; 2]>());

@@ -22,11 +22,7 @@ pub(crate) fn amortized_growth(cur_len: usize, additional: usize) -> usize {
     amortized.max(required)
 }
 
-pub(crate) type GrowableHeapBuffer = HeapBuffer<GrowableHeader>;
-pub(crate) type ExactHeapBuffer = HeapBuffer<ExactHeader>;
-
 #[repr(C)]
-#[expect(private_bounds)]
 pub struct HeapBuffer<H: Header> {
     // 64-bit architecture or 32-bit architecture if `is_len_heap_layout` is false:
     // | Header | Data (array of `u8`) |
@@ -39,10 +35,14 @@ pub struct HeapBuffer<H: Header> {
     _header: PhantomData<H>,
 }
 
-trait Header: Sized {
+trait Sealed {}
+
+#[expect(private_bounds)]
+pub(crate) trait Header: Sealed + Sized {
     const SIZE: usize;
     const ALIGN: usize;
 
+    #[expect(private_interfaces)]
     fn new(capacity: Capacity) -> Self;
 
     fn count(&self) -> &AtomicUsize;
@@ -57,10 +57,13 @@ pub struct GrowableHeader {
     capacity: Capacity,
 }
 
+impl Sealed for GrowableHeader {}
+
 impl Header for GrowableHeader {
     const SIZE: usize = size_of::<GrowableHeader>();
     const ALIGN: usize = align_of::<GrowableHeader>();
 
+    #[expect(private_interfaces)]
     fn new(capacity: Capacity) -> Self {
         GrowableHeader { count: AtomicUsize::new(1), capacity }
     }
@@ -84,10 +87,13 @@ pub struct ExactHeader {
     count: AtomicUsize,
 }
 
+impl Sealed for ExactHeader {}
+
 impl Header for ExactHeader {
     const SIZE: usize = size_of::<ExactHeader>();
     const ALIGN: usize = align_of::<ExactHeader>();
 
+    #[expect(private_interfaces)]
     fn new(_capacity: Capacity) -> Self {
         ExactHeader { count: AtomicUsize::new(1) }
     }
@@ -117,31 +123,42 @@ const _: () = {
     assert!(align_of::<HeapBuffer<ExactHeader>>() == align_of::<usize>());
 };
 
-#[expect(private_bounds)]
 impl<H: Header> HeapBuffer<H> {
     pub(super) fn new(text: &str) -> Result<Self, ReserveError> {
-        let text_len = text.len();
+        // SAFETY: All `text.len()` bytes are initialized by the copy below.
+        let buffer = unsafe { Self::new_uninit(text.len()) }?;
 
-        let len = TextLen::new(text_len)?;
-        let ptr = Self::allocate_ptr(text_len)?;
+        // SAFETY:
+        // - src (`text`) and dst (`buffer.ptr`) is valid for `text.len()` bytes because
+        //   `new_uninit` allocated at least `text.len()` bytes.
+        // - Both src and dst is aligned for u8.
+        // - src and dst don't overlap because we allocated dst just now.
+        unsafe { ptr::copy_nonoverlapping(text.as_ptr(), buffer.ptr.as_ptr(), text.len()) };
 
-        if len.is_heap() {
-            // SAFETY: Since the layout is computed from the same `text_len`, `ptr` is allocated
+        Ok(buffer)
+    }
+
+    /// Allocates a buffer for exactly `len` bytes, recording the length, and leaving the string
+    /// data uninitialized.
+    ///
+    /// # Safety
+    ///
+    /// The caller must initialize all `len` bytes (via [`HeapBuffer::ptr`]) as valid UTF-8
+    /// before the buffer content is read.
+    pub(super) unsafe fn new_uninit(len: usize) -> Result<Self, ReserveError> {
+        let text_len = TextLen::new(len)?;
+        let ptr = Self::allocate_ptr(len)?;
+
+        if text_len.is_heap() {
+            // SAFETY: Since the layout is computed from the same `len`, `ptr` is allocated
             // with enough space to store the length.
             unsafe {
                 let len_ptr = ptr.sub(Self::header_offset()).sub(size_of::<usize>());
-                ptr::write(len_ptr.as_ptr().cast(), text_len);
+                ptr::write(len_ptr.as_ptr().cast(), len);
             }
         }
 
-        // SAFETY:
-        // - src (`text`) and dst (`ptr`) is valid for `text_len` bytes because `text_len` comes
-        //   from `text`, and `ptr` was allocated to be at least that length.
-        // - Both src and dst is aligned for u8.
-        // - src and dst don't overlap because we allocated dst just now.
-        unsafe { ptr::copy_nonoverlapping(text.as_ptr(), ptr.as_ptr(), text_len) };
-
-        Ok(HeapBuffer { ptr, len, _header: PhantomData })
+        Ok(HeapBuffer { ptr, len: text_len, _header: PhantomData })
     }
 
     pub(super) fn ptr(&self) -> NonNull<u8> {
@@ -449,7 +466,7 @@ impl HeapBuffer<GrowableHeader> {
     ///
     /// # Safety
     /// - The buffer must be unique. (HeapBuffer::is_unique() == true)
-    pub(super) unsafe fn into_exact(self) -> Result<ExactHeapBuffer, (Self, ReserveError)> {
+    pub(super) unsafe fn into_exact(self) -> Result<HeapBuffer<ExactHeader>, (Self, ReserveError)> {
         debug_assert!(self.is_unique());
 
         let len = self.len();
@@ -458,7 +475,7 @@ impl HeapBuffer<GrowableHeader> {
         let old_layout = self.alloc_layout();
         // SAFETY: `len` is not greater than `old_capacity`, which is a valid `Capacity`.
         let new_capacity = unsafe { Capacity::new_unchecked(len) };
-        let new_layout = match ExactHeapBuffer::layout_for(new_capacity) {
+        let new_layout = match HeapBuffer::<ExactHeader>::layout_for(new_capacity) {
             Ok(layout) => layout,
             Err(err) => return Err((self, err)),
         };
@@ -474,7 +491,8 @@ impl HeapBuffer<GrowableHeader> {
         // Move the string bytes to the exact-layout offset before shrinking the allocation,
         // because the exact data starts before the growable data. `ptr::copy` permits overlap.
         let old_data = self.ptr.as_ptr();
-        let new_data = unsafe { allocation.add(new_len_prefix + ExactHeapBuffer::header_offset()) };
+        let new_data =
+            unsafe { allocation.add(new_len_prefix + HeapBuffer::<ExactHeader>::header_offset()) };
         unsafe { ptr::copy(old_data, new_data, len) };
 
         // SAFETY:
@@ -509,7 +527,8 @@ impl HeapBuffer<GrowableHeader> {
             let header = new_allocation.add(new_len_prefix).cast::<ExactHeader>();
             // count is 1 because the buffer is unique.
             ptr::write(header, ExactHeader { count: AtomicUsize::new(1) });
-            let data = new_allocation.add(new_len_prefix + ExactHeapBuffer::header_offset());
+            let data =
+                new_allocation.add(new_len_prefix + HeapBuffer::<ExactHeader>::header_offset());
             NonNull::new_unchecked(data)
         };
 
@@ -561,7 +580,9 @@ impl HeapBuffer<ExactHeader> {
     ///
     /// # Safety
     /// - The buffer must be unique. (HeapBuffer::is_unique() == true)
-    pub(super) unsafe fn into_growable(self) -> Result<GrowableHeapBuffer, (Self, ReserveError)> {
+    pub(super) unsafe fn into_growable(
+        self,
+    ) -> Result<HeapBuffer<GrowableHeader>, (Self, ReserveError)> {
         debug_assert!(self.is_unique());
 
         let len = self.len();
@@ -570,7 +591,7 @@ impl HeapBuffer<ExactHeader> {
         let capacity = unsafe { Capacity::new_unchecked(len) };
 
         let old_layout = self.alloc_layout();
-        let new_layout = match GrowableHeapBuffer::layout_for(capacity) {
+        let new_layout = match HeapBuffer::<GrowableHeader>::layout_for(capacity) {
             Ok(layout) => layout,
             Err(err) => return Err((self, err)),
         };
@@ -597,7 +618,8 @@ impl HeapBuffer<ExactHeader> {
         // SAFETY: `new_allocation` is a live allocation described by `new_layout`.
         let ptr = unsafe {
             let old_data = new_allocation.add(len_prefix + Self::header_offset());
-            let new_data = new_allocation.add(len_prefix + GrowableHeapBuffer::header_offset());
+            let new_data =
+                new_allocation.add(len_prefix + HeapBuffer::<GrowableHeader>::header_offset());
             ptr::copy(old_data, new_data, len);
             if len_prefix != 0 {
                 ptr::write(new_allocation.cast(), len);
@@ -768,14 +790,17 @@ mod tests {
 
     #[test]
     fn exact_layout_omits_capacity() {
-        assert_eq!(ExactHeapBuffer::header_offset(), size_of::<usize>());
-        assert_eq!(GrowableHeapBuffer::header_offset(), 2 * size_of::<usize>());
+        assert_eq!(HeapBuffer::<ExactHeader>::header_offset(), size_of::<usize>());
+        assert_eq!(HeapBuffer::<GrowableHeader>::header_offset(), 2 * size_of::<usize>());
 
         let len = MAX_INLINE_SIZE + 1;
         let capacity = Capacity::new(len).unwrap();
-        assert_eq!(ExactHeapBuffer::layout_for(capacity).unwrap().size(), size_of::<usize>() + len);
         assert_eq!(
-            GrowableHeapBuffer::layout_for(capacity).unwrap().size(),
+            HeapBuffer::<ExactHeader>::layout_for(capacity).unwrap().size(),
+            size_of::<usize>() + len
+        );
+        assert_eq!(
+            HeapBuffer::<GrowableHeader>::layout_for(capacity).unwrap().size(),
             2 * size_of::<usize>() + len
         );
     }
@@ -783,7 +808,7 @@ mod tests {
     #[test]
     fn exact_new_allocates_expected_content() {
         let text = "a text that is longer than the inline buffer limit";
-        let mut exact = ExactHeapBuffer::new(text).unwrap();
+        let mut exact = HeapBuffer::<ExactHeader>::new(text).unwrap();
 
         assert_eq!(exact.as_str(), text);
         assert_eq!(exact.len(), text.len());
@@ -796,7 +821,7 @@ mod tests {
     #[test]
     fn conversions_reuse_allocation_and_preserve_content() {
         let text = "short multibyte text: é日";
-        let growable = GrowableHeapBuffer::with_exact_capacity(text, 128).unwrap();
+        let growable = HeapBuffer::<GrowableHeader>::with_exact_capacity(text, 128).unwrap();
         assert_eq!(growable.capacity(), 128);
 
         // SAFETY: `growable` is the only reference to the allocation.
