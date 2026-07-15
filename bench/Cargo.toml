@@ -1,0 +1,25 @@
+[package]
+name = "bench"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+duplicate = "2.0.1"
+criterion = { version = "0.8", features = ["html_reports"] }
+lean_string = { path = "../" }
+lean_string_prev = { package = "lean_string", version = "=0.6.1" }
+compact_str = "=0.10.0"
+ecow = "=0.3.0"
+
+[[bench]]
+name = "apis"
+harness = false
+
+[[bench]]
+name = "comparison"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
