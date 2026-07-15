@@ -818,4 +818,84 @@ impl Repr<Mutable> {
             unsafe { self.as_inline_buffer_mut().set_len(new_len) };
         }
     }
+
+    #[inline]
+    pub(crate) fn into_immutable(self) -> Result<Repr<Immutable>, (Self, ReserveError)> {
+        if !self.is_heap_buffer() {
+            // SAFETY: Only the heap variant differs between the two mutabilities: inline and
+            // static buffers have the same representation in `Repr<Mutable>` and
+            // `Repr<Immutable>`.
+            return Ok(unsafe { mem::transmute::<Repr<Mutable>, Repr<Immutable>>(self) });
+        }
+
+        // SAFETY: We just checked that `self` is HeapBuffer. `Repr` has no drop glue, so the
+        // counted reference is moved (not duplicated) into `heap`.
+        let mut heap = unsafe { ptr::read(self.as_heap_buffer()) };
+        let heap_str = heap.as_str();
+
+        if heap.is_unique() {
+            if heap_str.len() <= MAX_INLINE_SIZE {
+                // SAFETY: We just checked that `heap_str.len() <= MAX_INLINE_SIZE`
+                let inline = Repr::from_inline(unsafe { InlineBuffer::new(heap_str) });
+                // The content is copied into the inline buffer, so drop our (unique) reference.
+                // SAFETY: `heap` is not accessed again.
+                unsafe { heap.release() };
+                Ok(inline)
+            } else {
+                // SAFETY: `heap` is unique (verified by `is_unique()`).
+                match unsafe { heap.into_exact() } {
+                    Ok(exact) => Ok(Repr::from_heap(exact)),
+                    Err((heap, err)) => Err((Repr::from_heap(heap), err)),
+                }
+            }
+        } else {
+            // The heap is shared, we need to copy it into a new immutable `Repr`.
+            match Repr::<Immutable>::from_str(heap_str) {
+                Ok(next) => {
+                    // Release our reference only after the copy is complete. If the allocation
+                    // above fails, the ref count remains untouched (no leak).
+                    // SAFETY: `heap` is not accessed again.
+                    unsafe { heap.release() };
+                    Ok(next)
+                }
+                Err(err) => Err((Repr::from_heap(heap), err)),
+            }
+        }
+    }
+}
+
+impl Repr<Immutable> {
+    #[inline]
+    pub(crate) fn into_mutable(self) -> Result<Repr<Mutable>, (Self, ReserveError)> {
+        if !self.is_heap_buffer() {
+            // SAFETY: Only the heap variant differs between the two mutabilities: inline and
+            // static buffers have the same representation in `Repr<Mutable>` and
+            // `Repr<Immutable>`.
+            return Ok(unsafe { mem::transmute::<Repr<Immutable>, Repr<Mutable>>(self) });
+        }
+
+        // SAFETY: We just checked that `self` is HeapBuffer. `Repr` has no drop glue, so the
+        // counted reference is moved (not duplicated) into `heap`.
+        let mut heap = unsafe { ptr::read(self.as_heap_buffer()) };
+
+        if heap.is_unique() {
+            // SAFETY: `heap` is unique (verified by `is_unique()`).
+            match unsafe { heap.into_growable() } {
+                Ok(growable) => Ok(Repr::from_heap(growable)),
+                Err((heap, err)) => Err((Repr::from_heap(heap), err)),
+            }
+        } else {
+            // The heap is shared, we need to copy it into a new growable `Repr`.
+            match Repr::<Mutable>::from_str(heap.as_str()) {
+                Ok(next) => {
+                    // Release our reference only after the copy is complete. If the allocation
+                    // above fails, the ref count remains untouched (no leak).
+                    // SAFETY: `heap` is not accessed again.
+                    unsafe { heap.release() };
+                    Ok(next)
+                }
+                Err(err) => Err((Repr::from_heap(heap), err)),
+            }
+        }
+    }
 }
