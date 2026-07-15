@@ -1,7 +1,7 @@
 // RUSTFLAGS="--cfg loom" cargo test --test loom --release --features loom -- --test-threads=1
 #![cfg(loom)]
 
-use lean_string::LeanString;
+use lean_string::{LeanStr, LeanString};
 use loom::thread;
 
 #[global_allocator]
@@ -57,6 +57,41 @@ loom_test! {
 
         assert_eq!(one.remove(3), 'd');
         assert_eq!(one, "abcefghijklmnopqrstuvwxyz");
+
+        th.join().unwrap();
+    }
+}
+
+loom_test! {
+    fn concurrent_lean_str_clone_and_to_lean_string() {
+        let one = LeanStr::from("abcdefghijklmnopqrstuvwxyz");
+        let two = one.clone();
+
+        let th = thread::spawn(move || {
+            let three = two.clone();
+            assert_eq!(three, "abcdefghijklmnopqrstuvwxyz");
+        });
+
+        let mut one_p = one.into_lean_string();
+        one_p.push('!');
+        assert_eq!(one_p, "abcdefghijklmnopqrstuvwxyz!");
+
+        th.join().unwrap();
+    }
+}
+
+loom_test! {
+    fn concurrent_lean_strting_clone_and_to_lean_str() {
+        let one = LeanString::from("abcdefghijklmnopqrstuvwxyz");
+        let two = one.clone();
+
+        let th = thread::spawn(move || {
+            let three = two.clone();
+            assert_eq!(three, "abcdefghijklmnopqrstuvwxyz");
+        });
+
+        let one_p = one.into_lean_str();
+        assert_eq!(one_p, "abcdefghijklmnopqrstuvwxyz");
 
         th.join().unwrap();
     }

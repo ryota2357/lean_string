@@ -1,12 +1,16 @@
-use lean_string::LeanString;
+use lean_string::{LeanStr, LeanString};
 
-static S: LeanString = LeanString::from_static_str("hello world");
-
-const STR: &str = S.as_str();
+static LEAN_STRING: LeanString = LeanString::from_static_str("hello world");
+static LEAN_STR: LeanStr = LeanStr::from_static_str("hello world");
 
 #[test]
 fn use_const() {
-    assert_eq!(STR, "hello world");
+    const {
+        const _: &str = LEAN_STRING.as_str();
+        const _: &str = LEAN_STR.as_str();
+    }
+    assert_eq!(LEAN_STRING.as_str(), "hello world");
+    assert_eq!(LEAN_STR.as_str(), "hello world");
 }
 
 #[test]
