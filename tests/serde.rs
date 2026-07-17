@@ -90,12 +90,12 @@ fn proptest_roundtrip(name: String, phones: Vec<String>, address: Option<String>
     assert_eq!(std_json, lean_string_json);
     assert_eq!(std_json, lean_str_json);
 
-    let std_de_compact: PersonString = serde_json::from_str(&lean_string_json).unwrap();
+    let std_de_lean_string: PersonString = serde_json::from_str(&lean_string_json).unwrap();
     let lean_string_de_std: PersonLeanString = serde_json::from_str(&std_json).unwrap();
     let lean_str_de_std: PersonLeanStr = serde_json::from_str(&std_json).unwrap();
 
-    // we should be able to deserailze from the opposite, serialized, source
-    assert_eq!(std_de_compact, std);
+    // we should be able to deserialize from the opposite serialized source
+    assert_eq!(std_de_lean_string, std);
     assert_eq!(lean_string_de_std, lean_string);
     assert_eq!(lean_str_de_std, lean_str);
 }
