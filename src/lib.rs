@@ -975,10 +975,11 @@ impl LeanString {
 
     /// Converts the [`LeanString`] into a [`LeanStr`].
     ///
-    /// An inline or static-backed string is converted at zero cost. A unique heap-allocated
-    /// string is converted by `realloc`-ing its buffer into the exact (capacity-less) layout,
-    /// and a shared heap-allocated string is copied into a new exact allocation. In either heap
-    /// case, if the content is short enough to be inlined, the result is inline instead.
+    /// Inline strings and strings created from a `&'static str` are converted at zero cost.
+    /// A heap-allocated string is moved into [`LeanStr`]'s heap layout, dropping any spare
+    /// capacity (much like [`String::into_boxed_str()`]): the buffer is reallocated in place
+    /// if it is not shared, and copied otherwise. If the content is short enough to be stored
+    /// inline, the result is inline instead.
     ///
     /// # Panics
     ///
@@ -1064,17 +1065,24 @@ impl Drop for LeanString {
 unsafe impl Send for LeanString {}
 unsafe impl Sync for LeanString {}
 
-/// Compact, immutable, UTF-8 encoded string type.
+/// Compact, reference-counted, UTF-8 encoded, immutable string type.
 ///
-/// [`LeanStr`] is the immutable counterpart of [`LeanString`]. It keeps the same three storage
-/// variants (inline, static, and heap), but its heap variant is an exactly-sized,
-/// reference-counted allocation without a capacity field, mirroring the relationship between
-/// [`String`] and [`str`].
+/// [`LeanStr`] is the immutable counterpart of [`LeanString`]: the same 2-word size, the same
+/// inline storage for short strings, the same O(1) construction from a `&'static str`, and O(1)
+/// reference-counted clones. Since it never grows, a heap-allocated [`LeanStr`] occupies exactly
+/// as much memory as its content needs, with no spare capacity.
 ///
-/// Converting between the two types is cheap: an inline or static-backed string converts at
-/// zero cost, and a heap-allocated string converts by `realloc`-ing the buffer when unique (or
-/// by copying when shared), unless its content is short enough to be inlined. See
-/// [`LeanString::into_lean_str()`] and [`LeanStr::into_lean_string()`].
+/// ## `LeanStr` vs a newtype of `LeanString`
+///
+/// [`LeanStr`] is not a newtype wrapper around [`LeanString`]. The two types use incompatible
+/// heap layouts ([`LeanStr`]'s carries no capacity), so converting a heap-allocated string in
+/// either direction may reallocate or copy the buffer. See [`LeanString::into_lean_str()`] and
+/// [`LeanStr::into_lean_string()`].
+///
+/// Because of this, [`LeanStr`] fits best when a string stays immutable for its whole life.
+/// If you mainly want to forbid mutation at the type level and convert back and forth freely,
+/// a newtype around [`LeanString`] serves better: both sides then share the same representation
+/// and convert at zero cost.
 #[repr(transparent)]
 pub struct LeanStr(Repr<Immutable>);
 
@@ -1311,9 +1319,9 @@ impl LeanStr {
 
     /// Converts the [`LeanStr`] into a [`LeanString`].
     ///
-    /// An inline or static-backed string is converted at zero cost. A unique heap-allocated
-    /// string is converted by `realloc`-ing its buffer into the growable (capacity-carrying)
-    /// layout, and a shared heap-allocated string is copied into a new growable allocation.
+    /// Inline strings and strings created from a `&'static str` are converted at zero cost.
+    /// A heap-allocated string is moved into [`LeanString`]'s heap layout: the buffer is
+    /// reallocated in place if it is not shared, and copied otherwise.
     ///
     /// # Panics
     ///
