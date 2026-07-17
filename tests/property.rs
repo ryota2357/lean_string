@@ -41,10 +41,10 @@ fn create_from_u8_bytes(input: Vec<u8>) {
     }
 
     let s1 = LeanString::from_utf8_lossy(input);
-    // let s2 = LeanStr::from_utf8_lossy(input);
+    let s2 = LeanStr::from_utf8_lossy(input);
     let string = String::from_utf8_lossy(input);
     prop_assert_eq!(&s1, &string);
-    // prop_assert_eq!(&s2, &string);
+    prop_assert_eq!(&s2, &string);
 }
 
 #[property_test]
@@ -53,22 +53,22 @@ fn create_from_u16_bytes(input: Vec<u16>) {
     let input = input.as_slice();
 
     let s1 = LeanString::from_utf16(input);
-    // let s2 = LeanStr::from_utf16(input);
+    let s2 = LeanStr::from_utf16(input);
     let string = String::from_utf16(input);
     prop_assert_eq!(s1.is_err(), string.is_err());
-    // prop_assert_eq!(s2.is_err(), string.is_err());
+    prop_assert_eq!(s2.is_err(), string.is_err());
     if let (Ok(lean), Ok(string)) = (s1, &string) {
         prop_assert_eq!(&lean, string);
     }
-    // if let (Ok(lean), Ok(string)) = (s2, &string) {
-    //     prop_assert_eq!(&lean, string);
-    // }
+    if let (Ok(lean), Ok(string)) = (s2, &string) {
+        prop_assert_eq!(&lean, string);
+    }
 
     let s1 = LeanString::from_utf16_lossy(input);
-    // let s2 = LeanStr::from_utf16_lossy(input);
+    let s2 = LeanStr::from_utf16_lossy(input);
     let string = String::from_utf16_lossy(input);
     prop_assert_eq!(&s1, &string);
-    // prop_assert_eq!(&s2, &string);
+    prop_assert_eq!(&s2, &string);
 }
 
 #[property_test]

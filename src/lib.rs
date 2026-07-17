@@ -977,7 +977,8 @@ impl LeanString {
     ///
     /// An inline or static-backed string is converted at zero cost. A unique heap-allocated
     /// string is converted by `realloc`-ing its buffer into the exact (capacity-less) layout,
-    /// and a shared heap-allocated string is copied into a new exact allocation.
+    /// and a shared heap-allocated string is copied into a new exact allocation. In either heap
+    /// case, if the content is short enough to be inlined, the result is inline instead.
     ///
     /// # Panics
     ///
@@ -1072,8 +1073,8 @@ unsafe impl Sync for LeanString {}
 ///
 /// Converting between the two types is cheap: an inline or static-backed string converts at
 /// zero cost, and a heap-allocated string converts by `realloc`-ing the buffer when unique (or
-/// by copying when shared). See [`LeanString::into_lean_str()`] and
-/// [`LeanStr::into_lean_string()`].
+/// by copying when shared), unless its content is short enough to be inlined. See
+/// [`LeanString::into_lean_str()`] and [`LeanStr::into_lean_string()`].
 #[repr(transparent)]
 pub struct LeanStr(Repr<Immutable>);
 
@@ -1151,6 +1152,25 @@ impl LeanStr {
         Ok(LeanStr::from(str))
     }
 
+    /// Converts a slice of bytes to a [`LeanStr`], including invalid characters.
+    ///
+    /// During this conversion, all invalid characters are replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let invalid_bytes = b"Hello \xF0\x90\x80World";
+    /// let string = LeanStr::from_utf8_lossy(invalid_bytes);
+    ///
+    /// assert_eq!(string, "Hello �World");
+    /// ```
+    #[inline]
+    pub fn from_utf8_lossy(buf: &[u8]) -> Self {
+        LeanString::from_utf8_lossy(buf).into_lean_str()
+    }
+
     /// Converts a slice of bytes to a [`LeanStr`] without checking if the bytes are valid UTF-8.
     ///
     /// # Safety
@@ -1161,6 +1181,48 @@ impl LeanStr {
     pub unsafe fn from_utf8_unchecked(buf: &[u8]) -> Self {
         let str = unsafe { str::from_utf8_unchecked(buf) };
         LeanStr::from(str)
+    }
+
+    /// Decodes a slice of UTF-16 encoded bytes to a [`LeanStr`], returning an error if `buf`
+    /// contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let v = &[0xD834, 0xDD1E, 0x006d, 0x0075, 0x0073, 0x0069, 0x0063];
+    /// assert_eq!(LeanStr::from_utf16(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[0xD834, 0xDD1E, 0x006d, 0x0075, 0xD800, 0x0069, 0x0063];
+    /// assert!(LeanStr::from_utf16(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16(buf: &[u16]) -> Result<Self, FromUtf16Error> {
+        LeanString::from_utf16(buf).map(|x| x.into_lean_str())
+    }
+
+    /// Decodes a slice of UTF-16 encoded bytes to a [`LeanStr`], replacing invalid code points
+    /// with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[0xD834, 0xDD1E, 0x006d, 0x0075, 0x0073, 0xDD1E, 0x0069, 0x0063, 0xD834];
+    /// assert_eq!(LeanStr::from_utf16_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    pub fn from_utf16_lossy(buf: &[u16]) -> Self {
+        LeanString::from_utf16_lossy(buf).into_lean_str()
     }
 
     /// Returns a string slice containing the entire [`LeanStr`].
@@ -1907,10 +1969,12 @@ impl FromIterator<LeanString> for LeanString {
 
 impl FromIterator<LeanStr> for LeanStr {
     fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
-        let mut buf = LeanString::new();
-        for s in iter {
-            buf.push_str(&s);
-        }
+        let mut iter = iter.into_iter();
+        let mut buf = match iter.next() {
+            Some(str) => str.into_lean_string(),
+            None => return LeanStr::new(),
+        };
+        buf.extend(iter);
         buf.into_lean_str()
     }
 }
@@ -1977,6 +2041,14 @@ impl Extend<LeanStr> for LeanString {
 
 impl Extend<LeanString> for String {
     fn extend<T: IntoIterator<Item = LeanString>>(&mut self, iter: T) {
+        for s in iter {
+            self.push_str(&s);
+        }
+    }
+}
+
+impl Extend<LeanStr> for String {
+    fn extend<T: IntoIterator<Item = LeanStr>>(&mut self, iter: T) {
         for s in iter {
             self.push_str(&s);
         }

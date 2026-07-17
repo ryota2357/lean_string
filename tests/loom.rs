@@ -81,7 +81,7 @@ loom_test! {
 }
 
 loom_test! {
-    fn concurrent_lean_strting_clone_and_to_lean_str() {
+    fn concurrent_lean_string_clone_and_to_lean_str() {
         let one = LeanString::from("abcdefghijklmnopqrstuvwxyz");
         let two = one.clone();
 
