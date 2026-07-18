@@ -8,14 +8,14 @@ pub(super) trait NumToRepr {
 impl NumToRepr for f32 {
     #[inline]
     fn into_repr<M: Mutability>(self) -> Result<Repr<M>, ReserveError> {
-        Repr::from_str(ryu::Buffer::new().format(self))
+        Repr::from_str(zmij::Buffer::new().format(self))
     }
 }
 
 impl NumToRepr for f64 {
     #[inline]
     fn into_repr<M: Mutability>(self) -> Result<Repr<M>, ReserveError> {
-        Repr::from_str(ryu::Buffer::new().format(self))
+        Repr::from_str(zmij::Buffer::new().format(self))
     }
 }
 
