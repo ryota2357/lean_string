@@ -1,5 +1,5 @@
 use crate::{
-    LeanStr, LeanString, ToLeanStringError, UnwrapWithMsg,
+    LeanStr, LeanString, ToLeanStrError, ToLeanStringError, UnwrapWithMsg,
     repr::{Immutable, Mutable, Repr},
 };
 use alloc::string::String;
@@ -101,13 +101,13 @@ pub trait ToLeanStr {
     ///
     /// # Errors
     ///
-    /// Returns a [`ToLeanStringError`] if the conversion fails.
-    fn try_to_lean_str(&self) -> Result<LeanStr, ToLeanStringError>;
+    /// Returns a [`ToLeanStrError`] if the conversion fails.
+    fn try_to_lean_str(&self) -> Result<LeanStr, ToLeanStrError>;
 }
 
 // NOTE: the restriction of `castaway` is `T` must be Sized.
 impl<T: fmt::Display> ToLeanStr for T {
-    fn try_to_lean_str(&self) -> Result<LeanStr, ToLeanStringError> {
+    fn try_to_lean_str(&self) -> Result<LeanStr, ToLeanStrError> {
         let repr = match_type!(self, {
             &i8 as s => Repr::from_num(*s)?,
             &u8 as s => Repr::from_num(*s)?,
