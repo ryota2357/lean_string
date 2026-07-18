@@ -135,7 +135,7 @@ fn access(c: &mut Criterion) {
                 let uut = build;
                 let uut = black_box(uut);
                 group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
-                    b.iter(|| black_box(uut.as_str()))
+                    b.iter(|| uut.as_str())
                 });
             }
         }
@@ -149,19 +149,22 @@ fn eq(c: &mut Criterion) {
         let len = s.len();
         duplicate! {
             [
-                label              build;
-                ["LeanString"]     [LeanString::from(s.as_str())];
-                ["CompactString"]  [CompactString::from(s.as_str())];
-                ["EcoString"]      [EcoString::from(s.as_str())];
-                ["String"]         [String::from(s.as_str())];
+                label              StrTy;
+                ["LeanString"]     [LeanString];
+                ["CompactString"]  [CompactString];
+                ["EcoString"]      [EcoString];
+                ["String"]         [String];
             ]
             {
-                let lhs = build;
-                let rhs = build;
-                let lhs = black_box(lhs);
-                let rhs = black_box(rhs);
+                let lhs = black_box(StrTy::from(s.as_str()));
+                let rhs = black_box(StrTy::from(s.as_str()));
                 group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
-                    b.iter(|| black_box(lhs == rhs))
+                    b.iter(|| black_box(&lhs) == black_box(&rhs))
+                });
+                let one = black_box(StrTy::from(s.as_str()));
+                let two = black_box(one.clone());
+                group.bench_with_input(BenchmarkId::new(format!("{}/cloned", &label), len), &len, |b, _| {
+                    b.iter(|| black_box(&one) == black_box(&two) )
                 });
             }
         }
@@ -190,6 +193,15 @@ fn ne(c: &mut Criterion) {
                 let rhs = black_box(StrTy::from(other.as_str()));
                 group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
                     b.iter(|| black_box(lhs != rhs))
+                });
+                let one = black_box(StrTy::from(s.as_str()));
+                let two = {
+                    let mut x = black_box(one.clone());
+                    x.pop();
+                    x
+                };
+                group.bench_with_input(BenchmarkId::new(format!("{}/cloned", &label), len), &len, |b, _| {
+                    b.iter(|| black_box(&one) == black_box(&two) )
                 });
             }
         }
