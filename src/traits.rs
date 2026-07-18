@@ -27,6 +27,13 @@ pub trait ToLeanString {
     fn try_to_lean_string(&self) -> Result<LeanString, ToLeanStringError>;
 }
 
+impl ToLeanString for str {
+    fn try_to_lean_string(&self) -> Result<LeanString, ToLeanStringError> {
+        let repr = Repr::from_str(self)?;
+        Ok(LeanString(repr))
+    }
+}
+
 // NOTE: the restriction of `castaway` is `T` must be Sized.
 impl<T: fmt::Display> ToLeanString for T {
     fn try_to_lean_string(&self) -> Result<LeanString, ToLeanStringError> {
@@ -103,6 +110,13 @@ pub trait ToLeanStr {
     ///
     /// Returns a [`ToLeanStrError`] if the conversion fails.
     fn try_to_lean_str(&self) -> Result<LeanStr, ToLeanStrError>;
+}
+
+impl ToLeanStr for str {
+    fn try_to_lean_str(&self) -> Result<LeanStr, ToLeanStrError> {
+        let repr = Repr::from_str(self)?;
+        Ok(LeanStr(repr))
+    }
 }
 
 // NOTE: the restriction of `castaway` is `T` must be Sized.
