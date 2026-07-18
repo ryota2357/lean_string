@@ -4,7 +4,7 @@
 // because they are UB (not logic errors). Miri with preemption is the right tool: it explores
 // thread interleavings and flags reads/writes to deallocated memory.
 
-use lean_string::LeanString;
+use lean_string::{LeanStr, LeanString};
 use std::thread;
 
 #[test]
@@ -63,6 +63,38 @@ fn drop_while_truncate() {
 
     one.truncate(10);
     assert_eq!(one, "abcdefghij");
+
+    th.join().unwrap();
+}
+
+#[test]
+fn drop_lean_str_while_mutating_lean_string() {
+    let one = LeanStr::from("abcdefghijklmnopqrstuvwxyz");
+    let two = one.clone();
+
+    let th = thread::spawn(move || {
+        drop(two);
+    });
+
+    let mut one_p = one.into_lean_string();
+    one_p.push('!');
+    assert_eq!(one_p, "abcdefghijklmnopqrstuvwxyz!");
+
+    th.join().unwrap();
+}
+
+#[test]
+fn drop_lean_string_while_into_lean_str() {
+    let mut string = LeanString::with_capacity(128);
+    string.push_str("abcdefghijklmnopqrstuvwxyz");
+    let shared = string.clone();
+
+    let th = thread::spawn(move || {
+        drop(shared);
+    });
+
+    let frozen = string.into_lean_str();
+    assert_eq!(frozen, "abcdefghijklmnopqrstuvwxyz");
 
     th.join().unwrap();
 }

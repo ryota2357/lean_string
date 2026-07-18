@@ -40,6 +40,10 @@ impl InlineBuffer {
         Self(buffer)
     }
 
+    pub(super) fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.0.as_mut_ptr()
+    }
+
     /// # Safety
     /// - `len` bytes in the buffer must be valid UTF-8.
     /// - `len` must be less than or equal to `MAX_INLINE_SIZE`.

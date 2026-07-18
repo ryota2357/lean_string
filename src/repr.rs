@@ -1,20 +1,43 @@
 use super::ReserveError;
 
-use core::{mem, ptr, slice, str};
+use core::{marker::PhantomData, mem, ptr, slice, str};
 
 #[cfg(not(loom))]
 use core::sync::atomic::{Ordering::*, fence};
 #[cfg(loom)]
 use loom::sync::atomic::{Ordering::*, fence};
 
-mod heap_buffer;
-use heap_buffer::HeapBuffer;
-
 mod inline_buffer;
 use inline_buffer::InlineBuffer;
 
 mod static_buffer;
 use static_buffer::StaticBuffer;
+
+mod heap_buffer;
+mod mutability {
+    use super::heap_buffer::{ExactHeader, GrowableHeader, Header};
+
+    trait Sealed {}
+
+    #[expect(private_bounds)]
+    pub(crate) trait Mutability: Sized + Sealed {
+        type Header: Header;
+    }
+
+    pub(crate) enum Mutable {}
+    impl Sealed for Mutable {}
+    impl Mutability for Mutable {
+        type Header = GrowableHeader;
+    }
+
+    pub(crate) enum Immutable {}
+    impl Sealed for Immutable {}
+    impl Mutability for Immutable {
+        type Header = ExactHeader;
+    }
+}
+pub(crate) use mutability::{Immutable, Mutability, Mutable};
+type HeapBuffer<M> = heap_buffer::HeapBuffer<<M as Mutability>::Header>;
 
 mod last_byte;
 use last_byte::LastByte;
@@ -26,20 +49,29 @@ const MAX_INLINE_SIZE: usize = 2 * size_of::<usize>();
 
 #[repr(C)]
 #[cfg(target_pointer_width = "64")]
-pub(crate) struct Repr(*const (), [u8; 7], LastByte);
+pub(crate) struct Repr<M: Mutability>(*const (), [u8; 7], LastByte, PhantomData<M>);
 
 #[repr(C)]
 #[cfg(target_pointer_width = "32")]
-pub(crate) struct Repr(*const (), [u8; 3], LastByte);
+pub(crate) struct Repr<M: Mutability>(*const (), [u8; 3], LastByte, PhantomData<M>);
 
 const _: () = {
-    assert!(size_of::<Repr>() == MAX_INLINE_SIZE);
-    assert!(size_of::<Option<Repr>>() == MAX_INLINE_SIZE);
-    assert!(align_of::<Repr>() == align_of::<usize>());
-    assert!(align_of::<Option<Repr>>() == align_of::<usize>());
+    assert!(size_of::<Repr<Mutable>>() == MAX_INLINE_SIZE);
+    assert!(size_of::<Option<Repr<Mutable>>>() == MAX_INLINE_SIZE);
+    assert!(align_of::<Repr<Mutable>>() == align_of::<usize>());
+    assert!(align_of::<Option<Repr<Mutable>>>() == align_of::<usize>());
+
+    assert!(size_of::<Repr<Immutable>>() == MAX_INLINE_SIZE);
+    assert!(size_of::<Option<Repr<Immutable>>>() == MAX_INLINE_SIZE);
+    assert!(align_of::<Repr<Immutable>>() == align_of::<usize>());
+    assert!(align_of::<Option<Repr<Immutable>>>() == align_of::<usize>());
 };
 
-impl Repr {
+// SAFETY: "true" and "false" are short enough (less than 8 bytes) to fit in InlineBuffer.
+const INLINE_BUFFER_TRUE: InlineBuffer = unsafe { InlineBuffer::new("true") };
+const INLINE_BUFFER_FALSE: InlineBuffer = unsafe { InlineBuffer::new("false") };
+
+impl<M: Mutability> Repr<M> {
     #[inline]
     pub(crate) const fn new() -> Self {
         Repr::from_inline(InlineBuffer::empty())
@@ -51,7 +83,7 @@ impl Repr {
             // SAFETY: `text.len()` is less than or equal to `MAX_INLINE_SIZE`
             Ok(Repr::from_inline(unsafe { InlineBuffer::new(text) }))
         } else {
-            HeapBuffer::new(text).map(Repr::from_heap)
+            HeapBuffer::<M>::new(text).map(Repr::from_heap)
         }
     }
 
@@ -67,16 +99,11 @@ impl Repr {
 
     #[inline]
     pub(crate) fn from_bool(b: bool) -> Self {
-        // SAFETY: "true" and "false" are short enough (less than 8 bytes) to fit in InlineBuffer.
-        const TRUE: Repr = Repr::from_inline(unsafe { InlineBuffer::new("true") });
-        const FALSE: Repr = Repr::from_inline(unsafe { InlineBuffer::new("false") });
-        if b { TRUE } else { FALSE }
-    }
-
-    #[inline]
-    #[allow(private_bounds)]
-    pub(crate) fn from_num(value: impl NumToRepr) -> Result<Self, ReserveError> {
-        value.into_repr()
+        if b {
+            Repr::from_inline(INLINE_BUFFER_TRUE)
+        } else {
+            Repr::from_inline(INLINE_BUFFER_FALSE)
+        }
     }
 
     #[inline]
@@ -94,11 +121,32 @@ impl Repr {
     }
 
     #[inline]
-    pub(crate) fn with_capacity(capacity: usize) -> Result<Self, ReserveError> {
-        if capacity <= MAX_INLINE_SIZE {
-            Ok(Repr::new())
+    #[allow(private_bounds)]
+    pub(crate) fn from_num(value: impl NumToRepr) -> Result<Self, ReserveError> {
+        value.into_repr()
+    }
+
+    /// Creates a `Repr` of exactly `len` bytes whose contents are written by `init`.
+    ///
+    /// NOTE: If `init` panics, a heap allocation may leak (which is safe).
+    ///
+    /// # Safety
+    ///
+    /// `init` must initialize all `len` bytes with valid UTF-8.
+    unsafe fn new_with(len: usize, init: impl FnOnce(*mut u8)) -> Result<Self, ReserveError> {
+        if len <= MAX_INLINE_SIZE {
+            let mut buffer = InlineBuffer::empty();
+            init(buffer.as_mut_ptr());
+            // SAFETY:
+            // - From `#Safety`, `init` initialized `len` bytes with valid UTF-8.
+            // - `len` is less than or equal to `MAX_INLINE_SIZE`.
+            unsafe { buffer.set_len(len) };
+            Ok(Repr::from_inline(buffer))
         } else {
-            HeapBuffer::with_capacity(capacity).map(Repr::from_heap)
+            // SAFETY: From `#Safety`, `init` initializes all `len` bytes below.
+            let buffer = unsafe { HeapBuffer::<M>::new_uninit(len) }?;
+            init(buffer.ptr().as_ptr());
+            Ok(Repr::from_heap(buffer))
         }
     }
 
@@ -156,19 +204,6 @@ impl Repr {
     }
 
     #[inline]
-    pub(crate) fn capacity(&self) -> usize {
-        if self.is_heap_buffer() {
-            // SAFETY: We just checked the discriminant to make sure we're heap allocated
-            unsafe { self.as_heap_buffer() }.capacity()
-        } else if self.is_static_buffer() {
-            // SAFETY: we just checked that `self` is StaticBuffer
-            unsafe { self.as_static_buffer() }.len()
-        } else {
-            MAX_INLINE_SIZE
-        }
-    }
-
-    #[inline]
     pub(crate) const fn as_str(&self) -> &str {
         // SAFETY: A `Repr` contains valid UTF-8
         unsafe { str::from_utf8_unchecked(self.as_bytes()) }
@@ -187,6 +222,152 @@ impl Repr {
         // SAFETY: data (`ptr`) is valid, aligned, and part of the same contiguous allocated `len`
         // chunk
         unsafe { slice::from_raw_parts(ptr, len) }
+    }
+
+    #[inline]
+    pub(crate) fn is_unique(&self) -> bool {
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked the discriminant to make sure we're heap allocated
+            unsafe { self.as_heap_buffer() }.is_unique()
+        } else {
+            true
+        }
+    }
+
+    #[inline]
+    pub(crate) fn make_shallow_clone(&self) -> Self {
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked that `self` is HeapBuffer.
+            let heap = unsafe { self.as_heap_buffer() };
+
+            // Same as Arc::clone.
+            // No need to use `Acquire` ordering because a new reference is created from the
+            // existing reference, we don't need to wait for the previous operations to complete.
+            // No need to use `Release` ordering because we don't need after operations to wait for
+            // the new reference to be created, which should be handled (synchronized) at the
+            // drop/dealloc (decrement reference count) time.
+            let prev = heap.reference_count().fetch_add(1, Relaxed);
+
+            // Same as Arc::clone.
+            // We use `isize::MAX` instead of `usize::MAX` because a reference count slightly
+            // larger than the threshold may be observed if a large number of threads stay between
+            // fetch_add ~ if. Using isize::MAX requires an unusual amount of threads to be stuck
+            // in this position in order to overflow the reference counter. Therefore, in practice,
+            // the reference counter can be guaranteed not to overflow at this position.
+            if prev > isize::MAX as usize {
+                ref_count_overflow(self)
+            }
+
+            // NOTE: A nested function cannot use the generic parameters of the enclosing impl,
+            // so it declares its own `M`.
+            #[cold]
+            fn ref_count_overflow<M: Mutability>(repr: &Repr<M>) -> ! {
+                // Decrement the reference count and deallocate the buffer (if needed).
+                unsafe { ptr::read(repr) }.replace_inner(Repr::new());
+                panic!("reference count overflow");
+            }
+        }
+
+        // SAFETY:
+        // - if `self` is HeapBuffer, we just incremented the reference count.
+        // - if `self` is InlineBuffer or StaticBuffer, we just copied the bytes.
+        unsafe { ptr::read(self) }
+    }
+
+    #[inline]
+    pub(crate) fn replace_inner(&mut self, other: Self) {
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked the discriminant to make sure we're heap allocated
+            let heap = unsafe { self.as_heap_buffer_mut() };
+            // SAFETY: `self` is overwritten immediately below and `heap` is not accessed again.
+            unsafe { heap.release() };
+        }
+
+        *self = other;
+    }
+
+    #[inline(always)]
+    pub(crate) const fn is_heap_buffer(&self) -> bool {
+        self.last_byte() == LastByte::HeapMarker as u8
+    }
+
+    #[inline(always)]
+    const fn is_static_buffer(&self) -> bool {
+        self.last_byte() == LastByte::StaticMarker as u8
+    }
+
+    #[inline(always)]
+    const fn from_inline(buffer: InlineBuffer) -> Self {
+        unsafe { mem::transmute(buffer) }
+    }
+
+    #[inline(always)]
+    const fn from_heap(buffer: HeapBuffer<M>) -> Self {
+        unsafe { mem::transmute(buffer) }
+    }
+
+    #[inline(always)]
+    const fn from_static(buffer: StaticBuffer) -> Self {
+        unsafe { mem::transmute(buffer) }
+    }
+
+    #[inline(always)]
+    const fn last_byte(&self) -> u8 {
+        self.2 as u8
+    }
+
+    #[inline(always)]
+    unsafe fn as_inline_buffer_mut(&mut self) -> &mut InlineBuffer {
+        // SAFETY: A `Repr` is transmuted from `InlineBuffer`
+        unsafe { &mut *(self as *mut _ as *mut InlineBuffer) }
+    }
+
+    #[inline(always)]
+    const unsafe fn as_heap_buffer(&self) -> &HeapBuffer<M> {
+        // SAFETY: A `Repr` is transmuted from `HeapBuffer`
+        unsafe { &*(self as *const _ as *const HeapBuffer<M>) }
+    }
+
+    #[inline(always)]
+    unsafe fn as_heap_buffer_mut(&mut self) -> &mut HeapBuffer<M> {
+        // SAFETY: A `Repr` is transmuted from `HeapBuffer`
+        unsafe { &mut *(self as *mut _ as *mut HeapBuffer<M>) }
+    }
+
+    #[inline(always)]
+    const unsafe fn as_static_buffer(&self) -> &StaticBuffer {
+        // SAFETY: A `Repr` is transmuted from `StaticBuffer`
+        unsafe { &*(self as *const _ as *const StaticBuffer) }
+    }
+
+    #[inline(always)]
+    unsafe fn as_static_buffer_mut(&mut self) -> &mut StaticBuffer {
+        // SAFETY: A `Repr` is transmuted from `StaticBuffer`
+        unsafe { &mut *(self as *mut _ as *mut StaticBuffer) }
+    }
+}
+
+impl Repr<Mutable> {
+    #[inline]
+    pub(crate) fn with_capacity(capacity: usize) -> Result<Self, ReserveError> {
+        if capacity <= MAX_INLINE_SIZE {
+            Ok(Repr::new())
+        } else {
+            HeapBuffer::<Mutable>::with_capacity(capacity).map(Repr::from_heap)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn capacity(&self) -> usize {
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked the discriminant to make sure we're heap allocated
+            unsafe { self.as_heap_buffer() }.capacity()
+        } else if self.is_static_buffer() {
+            // SAFETY: we just checked that `self` is StaticBuffer
+            unsafe { self.as_static_buffer() }.len()
+        } else {
+            MAX_INLINE_SIZE
+        }
     }
 
     #[inline]
@@ -219,7 +400,7 @@ impl Repr {
                     return Ok(());
                 }
 
-                outline!((heap: &mut HeapBuffer, len: usize, additional: usize): Result<(), ReserveError> {
+                outline!((heap: &mut HeapBuffer<Mutable>, len: usize, additional: usize): Result<(), ReserveError> {
                     let amortized_capacity = heap_buffer::amortized_growth(len, additional);
                     // SAFETY:
                     // - `heap` is unique (verified by `is_unique()`).
@@ -230,13 +411,13 @@ impl Repr {
                 // The heap is shared. We must read the data while our reference is still live
                 // (ref count unchanged), then create a new independent buffer.
 
-                outline!((this = self: &mut Repr, additional: usize): Result<(), ReserveError> {
+                outline!((this = self: &mut Repr<Mutable>, additional: usize): Result<(), ReserveError> {
                     // NOTE: We want to make this args for `outline!`, but `this` is a mutable reference so we can't do that.
                     // SAFETY: `this` is comes from `self`, we checked `self` is HeapBuffer.
                     let heap = unsafe { this.as_heap_buffer_mut() };
 
                     let str = heap.as_str();
-                    let new_heap = HeapBuffer::with_additional(str, additional)?;
+                    let new_heap = HeapBuffer::<Mutable>::with_additional(str, additional)?;
                     // Release our reference only after the copy is complete. If the allocation above
                     // fails, ref count remains untouched (no leak).
                     // SAFETY: `this` is overwritten immediately below and `heap` is not accessed again.
@@ -249,15 +430,15 @@ impl Repr {
             // We can't modify it, need to convert to other buffer.
 
             if needed_capacity <= MAX_INLINE_SIZE {
-                outline!((this = self: &mut Repr): Result<(), ReserveError> {
+                outline!((this = self: &mut Repr<Mutable>): Result<(), ReserveError> {
                     // SAFETY: `len <= needed_capacity <= MAX_INLINE_SIZE`
                     let inline = unsafe { InlineBuffer::new(this.as_str()) };
                     *this = Repr::from_inline(inline);
                     Ok(())
                 })
             } else {
-                outline!((this = self: &mut Repr, additional: usize): Result<(), ReserveError> {
-                    let heap = HeapBuffer::with_additional(this.as_str(), additional)?;
+                outline!((this = self: &mut Repr<Mutable>, additional: usize): Result<(), ReserveError> {
+                    let heap = HeapBuffer::<Mutable>::with_additional(this.as_str(), additional)?;
                     *this = Repr::from_heap(heap);
                     Ok(())
                 })
@@ -266,8 +447,8 @@ impl Repr {
             // self is InlineBuffer
 
             if needed_capacity > MAX_INLINE_SIZE {
-                outline!((this = self: &mut Repr, additional: usize): Result<(), ReserveError> {
-                    let heap = HeapBuffer::with_additional(this.as_str(), additional)?;
+                outline!((this = self: &mut Repr<Mutable>, additional: usize): Result<(), ReserveError> {
+                    let heap = HeapBuffer::<Mutable>::with_additional(this.as_str(), additional)?;
                     *this = Repr::from_heap(heap);
                     Ok(())
                 })
@@ -307,7 +488,7 @@ impl Repr {
         } else {
             // We need to create a new buffer because the current buffer is shared with others.
             let str = heap.as_str();
-            let new_heap = HeapBuffer::with_exact_capacity(str, new_capacity)?;
+            let new_heap = HeapBuffer::<Mutable>::with_exact_capacity(str, new_capacity)?;
             // SAFETY: `self` is overwritten immediately below and `heap` is not accessed again.
             unsafe { heap.release() };
             *self = Repr::from_heap(new_heap);
@@ -412,7 +593,7 @@ impl Repr {
         self.ensure_modifiable()?;
 
         struct SetLenOnDrop<'a> {
-            self_: &'a mut Repr,
+            self_: &'a mut Repr<Mutable>,
             src_idx: usize,
             dst_idx: usize,
         }
@@ -560,76 +741,6 @@ impl Repr {
         Ok(())
     }
 
-    #[inline]
-    pub(crate) fn is_unique(&self) -> bool {
-        if self.is_heap_buffer() {
-            // SAFETY: We just checked the discriminant to make sure we're heap allocated
-            unsafe { self.as_heap_buffer() }.is_unique()
-        } else {
-            true
-        }
-    }
-
-    #[inline]
-    pub(crate) fn make_shallow_clone(&self) -> Self {
-        if self.is_heap_buffer() {
-            // SAFETY: We just checked that `self` is HeapBuffer.
-            let heap = unsafe { self.as_heap_buffer() };
-
-            // Same as Arc::clone.
-            // No need to use `Acquire` ordering because a new reference is created from the
-            // existing reference, we don't need to wait for the previous operations to complete.
-            // No need to use `Release` ordering because we don't need after operations to wait for
-            // the new reference to be created, which should be handled (synchronized) at the
-            // drop/dealloc (decrement reference count) time.
-            let prev = heap.reference_count().fetch_add(1, Relaxed);
-
-            // Same as Arc::clone.
-            // We use `isize::MAX` instead of `usize::MAX` because a reference count slightly
-            // larger than the threshold may be observed if a large number of threads stay between
-            // fetch_add ~ if. Using isize::MAX requires an unusual amount of threads to be stuck
-            // in this position in order to overflow the reference counter. Therefore, in practice,
-            // the reference counter can be guaranteed not to overflow at this position.
-            if prev > isize::MAX as usize {
-                ref_count_overflow(self)
-            }
-
-            #[cold]
-            fn ref_count_overflow(repr: &Repr) -> ! {
-                // Decrement the reference count and deallocate the buffer (if needed).
-                unsafe { ptr::read(repr) }.replace_inner(Repr::new());
-                panic!("reference count overflow");
-            }
-        }
-
-        // SAFETY:
-        // - if `self` is HeapBuffer, we just incremented the reference count.
-        // - if `self` is InlineBuffer or StaticBuffer, we just copied the bytes.
-        unsafe { ptr::read(self) }
-    }
-
-    #[inline]
-    pub(crate) fn replace_inner(&mut self, other: Self) {
-        if self.is_heap_buffer() {
-            // SAFETY: We just checked the discriminant to make sure we're heap allocated
-            let heap = unsafe { self.as_heap_buffer_mut() };
-            // SAFETY: `self` is overwritten immediately below and `heap` is not accessed again.
-            unsafe { heap.release() };
-        }
-
-        *self = other;
-    }
-
-    #[inline(always)]
-    pub(crate) const fn is_heap_buffer(&self) -> bool {
-        self.last_byte() == LastByte::HeapMarker as u8
-    }
-
-    #[inline(always)]
-    const fn is_static_buffer(&self) -> bool {
-        self.last_byte() == LastByte::StaticMarker as u8
-    }
-
     /// Convert the buffer to a modifiable buffer.
     ///
     /// This method ensures:
@@ -644,7 +755,7 @@ impl Repr {
             if !heap.is_unique() {
                 // `heap` is shared, we need to create a new buffer.
                 let str = heap.as_str();
-                let new_heap = HeapBuffer::new(str)?;
+                let new_heap = HeapBuffer::<Mutable>::new(str)?;
                 // SAFETY: `self` is overwritten immediately below and `heap` is not accessed again.
                 unsafe { heap.release() };
                 *self = Repr::from_heap(new_heap);
@@ -708,53 +819,83 @@ impl Repr {
         }
     }
 
-    #[inline(always)]
-    const fn from_inline(buffer: InlineBuffer) -> Self {
-        unsafe { mem::transmute(buffer) }
-    }
+    #[inline]
+    pub(crate) fn into_immutable(self) -> Result<Repr<Immutable>, (Self, ReserveError)> {
+        if !self.is_heap_buffer() {
+            // SAFETY: Only the heap variant differs between the two mutabilities: inline and
+            // static buffers have the same representation in `Repr<Mutable>` and
+            // `Repr<Immutable>`.
+            return Ok(unsafe { mem::transmute::<Repr<Mutable>, Repr<Immutable>>(self) });
+        }
 
-    #[inline(always)]
-    const fn from_heap(buffer: HeapBuffer) -> Self {
-        unsafe { mem::transmute(buffer) }
-    }
+        // SAFETY: We just checked that `self` is HeapBuffer. `Repr` has no drop glue, so the
+        // counted reference is moved (not duplicated) into `heap`.
+        let mut heap = unsafe { ptr::read(self.as_heap_buffer()) };
+        let heap_str = heap.as_str();
 
-    #[inline(always)]
-    const fn from_static(buffer: StaticBuffer) -> Self {
-        unsafe { mem::transmute(buffer) }
+        if heap.is_unique() {
+            if heap_str.len() <= MAX_INLINE_SIZE {
+                // SAFETY: We just checked that `heap_str.len() <= MAX_INLINE_SIZE`
+                let inline = Repr::from_inline(unsafe { InlineBuffer::new(heap_str) });
+                // The content is copied into the inline buffer, so drop our (unique) reference.
+                // SAFETY: `heap` is not accessed again.
+                unsafe { heap.release() };
+                Ok(inline)
+            } else {
+                // SAFETY: `heap` is unique (verified by `is_unique()`).
+                match unsafe { heap.into_exact() } {
+                    Ok(exact) => Ok(Repr::from_heap(exact)),
+                    Err((heap, err)) => Err((Repr::from_heap(heap), err)),
+                }
+            }
+        } else {
+            // The heap is shared, we need to copy it into a new immutable `Repr`.
+            match Repr::<Immutable>::from_str(heap_str) {
+                Ok(next) => {
+                    // Release our reference only after the copy is complete. If the allocation
+                    // above fails, the ref count remains untouched (no leak).
+                    // SAFETY: `heap` is not accessed again.
+                    unsafe { heap.release() };
+                    Ok(next)
+                }
+                Err(err) => Err((Repr::from_heap(heap), err)),
+            }
+        }
     }
+}
 
-    #[inline(always)]
-    const fn last_byte(&self) -> u8 {
-        self.2 as u8
-    }
+impl Repr<Immutable> {
+    #[inline]
+    pub(crate) fn into_mutable(self) -> Result<Repr<Mutable>, (Self, ReserveError)> {
+        if !self.is_heap_buffer() {
+            // SAFETY: Only the heap variant differs between the two mutabilities: inline and
+            // static buffers have the same representation in `Repr<Mutable>` and
+            // `Repr<Immutable>`.
+            return Ok(unsafe { mem::transmute::<Repr<Immutable>, Repr<Mutable>>(self) });
+        }
 
-    #[inline(always)]
-    unsafe fn as_inline_buffer_mut(&mut self) -> &mut InlineBuffer {
-        // SAFETY: A `Repr` is transmuted from `InlineBuffer`
-        unsafe { &mut *(self as *mut _ as *mut InlineBuffer) }
-    }
+        // SAFETY: We just checked that `self` is HeapBuffer. `Repr` has no drop glue, so the
+        // counted reference is moved (not duplicated) into `heap`.
+        let mut heap = unsafe { ptr::read(self.as_heap_buffer()) };
 
-    #[inline(always)]
-    const unsafe fn as_heap_buffer(&self) -> &HeapBuffer {
-        // SAFETY: A `Repr` is transmuted from `HeapBuffer`
-        unsafe { &*(self as *const _ as *const HeapBuffer) }
-    }
-
-    #[inline(always)]
-    unsafe fn as_heap_buffer_mut(&mut self) -> &mut HeapBuffer {
-        // SAFETY: A `Repr` is transmuted from `HeapBuffer`
-        unsafe { &mut *(self as *mut _ as *mut HeapBuffer) }
-    }
-
-    #[inline(always)]
-    const unsafe fn as_static_buffer(&self) -> &StaticBuffer {
-        // SAFETY: A `Repr` is transmuted from `StaticBuffer`
-        unsafe { &*(self as *const _ as *const StaticBuffer) }
-    }
-
-    #[inline(always)]
-    unsafe fn as_static_buffer_mut(&mut self) -> &mut StaticBuffer {
-        // SAFETY: A `Repr` is transmuted from `StaticBuffer`
-        unsafe { &mut *(self as *mut _ as *mut StaticBuffer) }
+        if heap.is_unique() {
+            // SAFETY: `heap` is unique (verified by `is_unique()`).
+            match unsafe { heap.into_growable() } {
+                Ok(growable) => Ok(Repr::from_heap(growable)),
+                Err((heap, err)) => Err((Repr::from_heap(heap), err)),
+            }
+        } else {
+            // The heap is shared, we need to copy it into a new growable `Repr`.
+            match Repr::<Mutable>::from_str(heap.as_str()) {
+                Ok(next) => {
+                    // Release our reference only after the copy is complete. If the allocation
+                    // above fails, the ref count remains untouched (no leak).
+                    // SAFETY: `heap` is not accessed again.
+                    unsafe { heap.release() };
+                    Ok(next)
+                }
+                Err(err) => Err((Repr::from_heap(heap), err)),
+            }
+        }
     }
 }

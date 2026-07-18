@@ -26,6 +26,10 @@ Compact, clone-on-write string.
 - High API compatibility for `String`.
 - Supports `no_std` environment.
 
+This crate also provides `LeanStr`, an immutable version of `LeanString`.
+It is not a newtype wrapper around `LeanString`, and converting between the two is not always free.
+See [its documentation](https://docs.rs/lean_string/latest/lean_string/struct.LeanStr.html) for details and when to prefer which.
+
 ## Example
 
 ```rust

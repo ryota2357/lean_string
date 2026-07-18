@@ -11,6 +11,7 @@ use core::{
     borrow::Borrow,
     cmp, fmt,
     hash::{Hash, Hasher},
+    mem,
     ops::{Add, AddAssign, Deref},
     str,
     str::FromStr,
@@ -22,19 +23,19 @@ use alloc::{borrow::Cow, boxed::Box, string::String};
 use std::ffi::OsStr;
 
 mod repr;
-use repr::Repr;
+use repr::{Immutable, Mutable, Repr};
 
 mod errors;
 pub use errors::*;
 
 mod traits;
-pub use traits::ToLeanString;
+pub use traits::{ToLeanStr, ToLeanString};
 
 mod features;
 
 /// Compact, clone-on-write, UTF-8 encoded, growable string type.
 #[repr(transparent)]
-pub struct LeanString(Repr);
+pub struct LeanString(Repr<Mutable>);
 
 const _: () = {
     assert!(size_of::<LeanString>() == size_of::<[usize; 2]>());
@@ -971,6 +972,51 @@ impl LeanString {
     pub fn is_heap_allocated(&self) -> bool {
         self.0.is_heap_buffer()
     }
+
+    /// Converts the [`LeanString`] into a [`LeanStr`].
+    ///
+    /// Inline strings and strings created from a `&'static str` are converted at zero cost.
+    /// A heap-allocated string is moved into [`LeanStr`]'s heap layout, dropping any spare
+    /// capacity (much like [`String::into_boxed_str()`]): the buffer is reallocated in place
+    /// if it is not shared, and copied otherwise. If the content is short enough to be stored
+    /// inline, the result is inline instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if converting a heap-allocated string fails to allocate. To handle the failure,
+    /// use [`LeanString::try_into_lean_str()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::{LeanStr, LeanString};
+    /// let s = LeanString::from("This is a heap-allocated string!!");
+    /// let s: LeanStr = s.into_lean_str();
+    /// assert_eq!(s, "This is a heap-allocated string!!");
+    /// ```
+    #[inline]
+    pub fn into_lean_str(self) -> LeanStr {
+        self.try_into_lean_str().unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanString::into_lean_str()`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ReserveError`] if converting a heap-allocated string fails to allocate.
+    /// Because this method consumes `self`, the original string is dropped on failure.
+    #[inline]
+    pub fn try_into_lean_str(mut self) -> Result<LeanStr, ReserveError> {
+        let repr = mem::replace(&mut self.0, Repr::new());
+        match repr.into_immutable() {
+            Ok(repr) => Ok(LeanStr(repr)),
+            Err((repr, err)) => {
+                // Hand the original back to `self` so its `Drop` releases the buffer.
+                self.0 = repr;
+                Err(err)
+            }
+        }
+    }
 }
 
 /// A [`Clone`] implementation for [`LeanString`].
@@ -1019,7 +1065,350 @@ impl Drop for LeanString {
 unsafe impl Send for LeanString {}
 unsafe impl Sync for LeanString {}
 
+/// Compact, reference-counted, UTF-8 encoded, immutable string type.
+///
+/// [`LeanStr`] is the immutable counterpart of [`LeanString`]: the same 2-word size, the same
+/// inline storage for short strings, the same O(1) construction from a `&'static str`, and O(1)
+/// reference-counted clones. Since it never grows, a heap-allocated [`LeanStr`] occupies exactly
+/// as much memory as its content needs, with no spare capacity.
+///
+/// ## `LeanStr` vs a newtype of `LeanString`
+///
+/// [`LeanStr`] is not a newtype wrapper around [`LeanString`]. The two types use incompatible
+/// heap layouts ([`LeanStr`]'s carries no capacity), so converting a heap-allocated string in
+/// either direction may reallocate or copy the buffer. See [`LeanString::into_lean_str()`] and
+/// [`LeanStr::into_lean_string()`].
+///
+/// Because of this, [`LeanStr`] fits best when a string stays immutable for its whole life.
+/// If you mainly want to forbid mutation at the type level and convert back and forth freely,
+/// a newtype around [`LeanString`] serves better: both sides then share the same representation
+/// and convert at zero cost.
+#[repr(transparent)]
+pub struct LeanStr(Repr<Immutable>);
+
+const _: () = {
+    assert!(size_of::<LeanStr>() == size_of::<[usize; 2]>());
+    assert!(size_of::<Option<LeanStr>>() == size_of::<[usize; 2]>());
+    assert!(align_of::<LeanStr>() == align_of::<usize>());
+    assert!(align_of::<Option<LeanStr>>() == align_of::<usize>());
+};
+
+impl LeanStr {
+    /// Creates a new empty [`LeanStr`].
+    ///
+    /// Same as [`LeanString::new()`], this will not allocate on the heap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::new();
+    /// assert!(s.is_empty());
+    /// assert!(!s.is_heap_allocated());
+    /// ```
+    #[inline]
+    pub const fn new() -> Self {
+        LeanStr(Repr::new())
+    }
+
+    /// Creates a new [`LeanStr`] from a `&'static str`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from_static_str("Long text but static lifetime");
+    /// assert_eq!(s.as_str(), "Long text but static lifetime");
+    /// assert!(!s.is_heap_allocated());
+    /// ```
+    #[inline]
+    pub const fn from_static_str(text: &'static str) -> Self {
+        match Repr::from_static_str(text) {
+            Ok(repr) => LeanStr(repr),
+            Err(_) => panic!("text is too long"),
+        }
+    }
+
+    /// Converts a slice of bytes to a [`LeanStr`].
+    ///
+    /// If the slice is not valid UTF-8, an error is returned.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-8
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let bytes = vec![240, 159, 166, 128];
+    /// let string = LeanStr::from_utf8(&bytes).expect("valid UTF-8");
+    ///
+    /// assert_eq!(string, "🦀");
+    /// ```
+    ///
+    /// ## invalid UTF-8
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let bytes = &[255, 255, 255];
+    /// let result = LeanStr::from_utf8(bytes);
+    ///
+    /// assert!(result.is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf8(buf: &[u8]) -> Result<Self, str::Utf8Error> {
+        let str = str::from_utf8(buf)?;
+        Ok(LeanStr::from(str))
+    }
+
+    /// Converts a slice of bytes to a [`LeanStr`], including invalid characters.
+    ///
+    /// During this conversion, all invalid characters are replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let invalid_bytes = b"Hello \xF0\x90\x80World";
+    /// let string = LeanStr::from_utf8_lossy(invalid_bytes);
+    ///
+    /// assert_eq!(string, "Hello �World");
+    /// ```
+    #[inline]
+    pub fn from_utf8_lossy(buf: &[u8]) -> Self {
+        LeanString::from_utf8_lossy(buf).into_lean_str()
+    }
+
+    /// Converts a slice of bytes to a [`LeanStr`] without checking if the bytes are valid UTF-8.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it does not check that the bytes passed to it are valid
+    /// UTF-8. If this constraint is violated, it may cause memory unsafety issues.
+    #[inline]
+    pub unsafe fn from_utf8_unchecked(buf: &[u8]) -> Self {
+        let str = unsafe { str::from_utf8_unchecked(buf) };
+        LeanStr::from(str)
+    }
+
+    /// Decodes a slice of UTF-16 encoded bytes to a [`LeanStr`], returning an error if `buf`
+    /// contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let v = &[0xD834, 0xDD1E, 0x006d, 0x0075, 0x0073, 0x0069, 0x0063];
+    /// assert_eq!(LeanStr::from_utf16(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[0xD834, 0xDD1E, 0x006d, 0x0075, 0xD800, 0x0069, 0x0063];
+    /// assert!(LeanStr::from_utf16(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16(buf: &[u16]) -> Result<Self, FromUtf16Error> {
+        LeanString::from_utf16(buf).map(|x| x.into_lean_str())
+    }
+
+    /// Decodes a slice of UTF-16 encoded bytes to a [`LeanStr`], replacing invalid code points
+    /// with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[0xD834, 0xDD1E, 0x006d, 0x0075, 0x0073, 0xDD1E, 0x0069, 0x0063, 0xD834];
+    /// assert_eq!(LeanStr::from_utf16_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    pub fn from_utf16_lossy(buf: &[u16]) -> Self {
+        LeanString::from_utf16_lossy(buf).into_lean_str()
+    }
+
+    /// Returns a string slice containing the entire [`LeanStr`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("foo");
+    /// assert_eq!(s.as_str(), "foo");
+    /// ```
+    #[inline]
+    pub const fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Returns a byte slice of the [`LeanStr`]'s contents.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("hello");
+    /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
+    /// ```
+    #[inline]
+    pub const fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+
+    /// Returns the length of the [`LeanStr`] in bytes, not [`char`]s or graphemes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("foo");
+    /// assert_eq!(s.len(), 3);
+    ///
+    /// let fancy_f = LeanStr::from("ƒoo");
+    /// assert_eq!(fancy_f.len(), 4);
+    /// assert_eq!(fancy_f.chars().count(), 3);
+    /// ```
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns `true` if the [`LeanStr`] has a length of zero, and `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// assert!(LeanStr::new().is_empty());
+    /// assert!(!LeanStr::from("foo").is_empty());
+    /// ```
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Returns whether the [`LeanStr`] is heap-allocated.
+    ///
+    /// # Examples
+    ///
+    /// ## inline
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("hello");
+    /// assert!(!s.is_heap_allocated());
+    /// ```
+    ///
+    /// ## heap
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("More than 2 * size_of::<usize>() bytes is heap-allocated");
+    /// assert!(s.is_heap_allocated());
+    /// ```
+    #[inline]
+    pub fn is_heap_allocated(&self) -> bool {
+        self.0.is_heap_buffer()
+    }
+
+    /// Converts the [`LeanStr`] into a [`LeanString`].
+    ///
+    /// Inline strings and strings created from a `&'static str` are converted at zero cost.
+    /// A heap-allocated string is moved into [`LeanString`]'s heap layout: the buffer is
+    /// reallocated in place if it is not shared, and copied otherwise.
+    ///
+    /// # Panics
+    ///
+    /// Panics if converting a heap-allocated string fails to allocate. To handle the failure,
+    /// use [`LeanStr::try_into_lean_string()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::{LeanStr, LeanString};
+    /// let s = LeanStr::from("This is a heap-allocated string!!");
+    /// let s: LeanString = s.into_lean_string();
+    /// assert_eq!(s, "This is a heap-allocated string!!");
+    /// ```
+    #[inline]
+    pub fn into_lean_string(self) -> LeanString {
+        self.try_into_lean_string().unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanStr::into_lean_string()`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ReserveError`] if converting a heap-allocated string fails to allocate.
+    /// Because this method consumes `self`, the original string is dropped on failure.
+    #[inline]
+    pub fn try_into_lean_string(mut self) -> Result<LeanString, ReserveError> {
+        let repr = mem::replace(&mut self.0, Repr::new());
+        match repr.into_mutable() {
+            Ok(repr) => Ok(LeanString(repr)),
+            Err((repr, err)) => {
+                // Hand the original back to `self` so its `Drop` releases the buffer.
+                self.0 = repr;
+                Err(err)
+            }
+        }
+    }
+}
+
+/// A [`Clone`] implementation for [`LeanStr`].
+///
+/// Same as [`LeanString`], cloning is performed by reference counting, so it is O(1) and does
+/// not allocate.
+///
+/// # Examples
+///
+/// ```
+/// # use lean_string::LeanStr;
+/// let s1 = LeanStr::from("Hello, World!");
+/// let s2 = s1.clone();
+///
+/// assert_eq!(s1, s2);
+/// ```
+impl Clone for LeanStr {
+    #[inline]
+    fn clone(&self) -> Self {
+        LeanStr(self.0.make_shallow_clone())
+    }
+
+    #[inline]
+    fn clone_from(&mut self, source: &Self) {
+        self.0.replace_inner(source.0.make_shallow_clone());
+    }
+}
+
+/// A [`Drop`] implementation for [`LeanStr`].
+///
+/// When the last reference to a [`LeanStr`] is dropped, its heap allocation (if any) is freed.
+impl Drop for LeanStr {
+    #[inline]
+    fn drop(&mut self) {
+        self.0.replace_inner(Repr::new());
+    }
+}
+
+// SAFETY: `LeanStr` is `repr(transparent)` over `Repr`, and `Repr` works like `Arc`.
+unsafe impl Send for LeanStr {}
+unsafe impl Sync for LeanStr {}
+
 impl Default for LeanString {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for LeanStr {
     #[inline]
     fn default() -> Self {
         Self::new()
@@ -1035,7 +1424,22 @@ impl Deref for LeanString {
     }
 }
 
+impl Deref for LeanStr {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl fmt::Debug for LeanString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+impl fmt::Debug for LeanStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.as_str(), f)
     }
@@ -1047,7 +1451,20 @@ impl fmt::Display for LeanString {
     }
 }
 
+impl fmt::Display for LeanStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.as_str(), f)
+    }
+}
+
 impl AsRef<str> for LeanString {
+    #[inline]
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for LeanStr {
     #[inline]
     fn as_ref(&self) -> &str {
         self.as_str()
@@ -1062,7 +1479,22 @@ impl AsRef<OsStr> for LeanString {
     }
 }
 
+#[cfg(feature = "std")]
+impl AsRef<OsStr> for LeanStr {
+    #[inline]
+    fn as_ref(&self) -> &OsStr {
+        OsStr::new(self.as_str())
+    }
+}
+
 impl AsRef<[u8]> for LeanString {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl AsRef<[u8]> for LeanStr {
     #[inline]
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
@@ -1076,7 +1508,16 @@ impl Borrow<str> for LeanString {
     }
 }
 
+impl Borrow<str> for LeanStr {
+    #[inline]
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl Eq for LeanString {}
+
+impl Eq for LeanStr {}
 
 impl PartialEq for LeanString {
     #[inline]
@@ -1085,7 +1526,35 @@ impl PartialEq for LeanString {
     }
 }
 
+impl PartialEq for LeanStr {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str().eq(other.as_str())
+    }
+}
+
+impl PartialEq<LeanStr> for LeanString {
+    #[inline]
+    fn eq(&self, other: &LeanStr) -> bool {
+        self.as_str().eq(other.as_str())
+    }
+}
+
+impl PartialEq<LeanString> for LeanStr {
+    #[inline]
+    fn eq(&self, other: &LeanString) -> bool {
+        self.as_str().eq(other.as_str())
+    }
+}
+
 impl PartialEq<str> for LeanString {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        self.as_str().eq(other)
+    }
+}
+
+impl PartialEq<str> for LeanStr {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         self.as_str().eq(other)
@@ -1099,7 +1568,21 @@ impl PartialEq<LeanString> for str {
     }
 }
 
+impl PartialEq<LeanStr> for str {
+    #[inline]
+    fn eq(&self, other: &LeanStr) -> bool {
+        self.eq(other.as_str())
+    }
+}
+
 impl PartialEq<&str> for LeanString {
+    #[inline]
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str().eq(*other)
+    }
+}
+
+impl PartialEq<&str> for LeanStr {
     #[inline]
     fn eq(&self, other: &&str) -> bool {
         self.as_str().eq(*other)
@@ -1113,7 +1596,21 @@ impl PartialEq<LeanString> for &str {
     }
 }
 
+impl PartialEq<LeanStr> for &str {
+    #[inline]
+    fn eq(&self, other: &LeanStr) -> bool {
+        (*self).eq(other.as_str())
+    }
+}
+
 impl PartialEq<String> for LeanString {
+    #[inline]
+    fn eq(&self, other: &String) -> bool {
+        self.as_str().eq(other.as_str())
+    }
+}
+
+impl PartialEq<String> for LeanStr {
     #[inline]
     fn eq(&self, other: &String) -> bool {
         self.as_str().eq(other.as_str())
@@ -1127,7 +1624,21 @@ impl PartialEq<LeanString> for String {
     }
 }
 
+impl PartialEq<LeanStr> for String {
+    #[inline]
+    fn eq(&self, other: &LeanStr) -> bool {
+        self.as_str().eq(other.as_str())
+    }
+}
+
 impl PartialEq<Cow<'_, str>> for LeanString {
+    #[inline]
+    fn eq(&self, other: &Cow<'_, str>) -> bool {
+        self.as_str().eq(other.as_ref())
+    }
+}
+
+impl PartialEq<Cow<'_, str>> for LeanStr {
     #[inline]
     fn eq(&self, other: &Cow<'_, str>) -> bool {
         self.as_str().eq(other.as_ref())
@@ -1141,7 +1652,21 @@ impl PartialEq<LeanString> for Cow<'_, str> {
     }
 }
 
+impl PartialEq<LeanStr> for Cow<'_, str> {
+    #[inline]
+    fn eq(&self, other: &LeanStr) -> bool {
+        self.as_ref().eq(other.as_str())
+    }
+}
+
 impl Ord for LeanString {
+    #[inline]
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl Ord for LeanStr {
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.as_str().cmp(other.as_str())
@@ -1155,7 +1680,21 @@ impl PartialOrd for LeanString {
     }
 }
 
+impl PartialOrd for LeanStr {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Hash for LeanString {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state)
+    }
+}
+
+impl Hash for LeanStr {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state)
@@ -1170,11 +1709,27 @@ impl From<char> for LeanString {
     }
 }
 
+impl From<char> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: char) -> Self {
+        LeanStr(Repr::from_char(value))
+    }
+}
+
 impl From<&str> for LeanString {
     #[inline]
     #[track_caller]
     fn from(value: &str) -> Self {
         LeanString(Repr::from_str(value).unwrap_with_msg())
+    }
+}
+
+impl From<&str> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: &str) -> Self {
+        LeanStr(Repr::from_str(value).unwrap_with_msg())
     }
 }
 
@@ -1186,6 +1741,14 @@ impl From<String> for LeanString {
     }
 }
 
+impl From<String> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: String) -> Self {
+        LeanStr(Repr::from_str(&value).unwrap_with_msg())
+    }
+}
+
 impl From<&String> for LeanString {
     #[inline]
     #[track_caller]
@@ -1194,7 +1757,24 @@ impl From<&String> for LeanString {
     }
 }
 
+impl From<&String> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: &String) -> Self {
+        LeanStr(Repr::from_str(value).unwrap_with_msg())
+    }
+}
+
 impl From<Cow<'_, str>> for LeanString {
+    fn from(cow: Cow<str>) -> Self {
+        match cow {
+            Cow::Borrowed(s) => s.into(),
+            Cow::Owned(s) => s.into(),
+        }
+    }
+}
+
+impl From<Cow<'_, str>> for LeanStr {
     fn from(cow: Cow<str>) -> Self {
         match cow {
             Cow::Borrowed(s) => s.into(),
@@ -1211,9 +1791,24 @@ impl From<Box<str>> for LeanString {
     }
 }
 
+impl From<Box<str>> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: Box<str>) -> Self {
+        LeanStr(Repr::from_str(&value).unwrap_with_msg())
+    }
+}
+
 impl From<&LeanString> for LeanString {
     #[inline]
     fn from(value: &LeanString) -> Self {
+        value.clone()
+    }
+}
+
+impl From<&LeanStr> for LeanStr {
+    #[inline]
+    fn from(value: &LeanStr) -> Self {
         value.clone()
     }
 }
@@ -1225,6 +1820,13 @@ impl From<LeanString> for String {
     }
 }
 
+impl From<LeanStr> for String {
+    #[inline]
+    fn from(value: LeanStr) -> Self {
+        value.as_str().into()
+    }
+}
+
 impl From<&LeanString> for String {
     #[inline]
     fn from(value: &LeanString) -> Self {
@@ -1232,7 +1834,39 @@ impl From<&LeanString> for String {
     }
 }
 
+impl From<&LeanStr> for String {
+    #[inline]
+    fn from(value: &LeanStr) -> Self {
+        value.as_str().into()
+    }
+}
+
+impl From<LeanString> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: LeanString) -> Self {
+        value.into_lean_str()
+    }
+}
+
+impl From<LeanStr> for LeanString {
+    #[inline]
+    #[track_caller]
+    fn from(value: LeanStr) -> Self {
+        value.into_lean_string()
+    }
+}
+
 impl FromStr for LeanString {
+    type Err = ReserveError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Repr::from_str(s).map(Self)
+    }
+}
+
+impl FromStr for LeanStr {
     type Err = ReserveError;
 
     #[inline]
@@ -1256,9 +1890,21 @@ impl FromIterator<char> for LeanString {
     }
 }
 
+impl FromIterator<char> for LeanStr {
+    fn from_iter<T: IntoIterator<Item = char>>(iter: T) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
+    }
+}
+
 impl<'a> FromIterator<&'a char> for LeanString {
     fn from_iter<T: IntoIterator<Item = &'a char>>(iter: T) -> Self {
         iter.into_iter().copied().collect()
+    }
+}
+
+impl<'a> FromIterator<&'a char> for LeanStr {
+    fn from_iter<T: IntoIterator<Item = &'a char>>(iter: T) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
     }
 }
 
@@ -1270,11 +1916,23 @@ impl<'a> FromIterator<&'a str> for LeanString {
     }
 }
 
+impl<'a> FromIterator<&'a str> for LeanStr {
+    fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
+    }
+}
+
 impl FromIterator<Box<str>> for LeanString {
     fn from_iter<I: IntoIterator<Item = Box<str>>>(iter: I) -> Self {
         let mut buf = LeanString::new();
         buf.extend(iter);
         buf
+    }
+}
+
+impl FromIterator<Box<str>> for LeanStr {
+    fn from_iter<I: IntoIterator<Item = Box<str>>>(iter: I) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
     }
 }
 
@@ -1286,11 +1944,23 @@ impl<'a> FromIterator<Cow<'a, str>> for LeanString {
     }
 }
 
+impl<'a> FromIterator<Cow<'a, str>> for LeanStr {
+    fn from_iter<I: IntoIterator<Item = Cow<'a, str>>>(iter: I) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
+    }
+}
+
 impl FromIterator<String> for LeanString {
     fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
         let mut buf = LeanString::new();
         buf.extend(iter);
         buf
+    }
+}
+
+impl FromIterator<String> for LeanStr {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
     }
 }
 
@@ -1302,6 +1972,18 @@ impl FromIterator<LeanString> for LeanString {
         };
         buf.extend(iter);
         buf
+    }
+}
+
+impl FromIterator<LeanStr> for LeanStr {
+    fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
+        let mut iter = iter.into_iter();
+        let mut buf = match iter.next() {
+            Some(str) => str.into_lean_string(),
+            None => return LeanStr::new(),
+        };
+        buf.extend(iter);
+        buf.into_lean_str()
     }
 }
 
@@ -1357,8 +2039,24 @@ impl Extend<LeanString> for LeanString {
     }
 }
 
+impl Extend<LeanStr> for LeanString {
+    fn extend<T: IntoIterator<Item = LeanStr>>(&mut self, iter: T) {
+        for s in iter {
+            self.push_str(&s);
+        }
+    }
+}
+
 impl Extend<LeanString> for String {
     fn extend<T: IntoIterator<Item = LeanString>>(&mut self, iter: T) {
+        for s in iter {
+            self.push_str(&s);
+        }
+    }
+}
+
+impl Extend<LeanStr> for String {
+    fn extend<T: IntoIterator<Item = LeanStr>>(&mut self, iter: T) {
         for s in iter {
             self.push_str(&s);
         }
