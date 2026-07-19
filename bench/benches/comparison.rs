@@ -1,14 +1,20 @@
 //! Cross-library comparison against compact_str, ecow, std::String, and Arc<str>.
 
-use std::hint::black_box;
-use std::sync::Arc;
-
-use bench::{STATIC_STR_16, STATIC_STR_40, ascii, differ_at_last, samples};
-use compact_str::{CompactString, ToCompactString};
+use bench::{STATIC_STR_16, STATIC_STR_40, ascii};
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use duplicate::duplicate;
+
+use compact_str::{CompactString, ToCompactString};
 use ecow::EcoString;
 use lean_string::{LeanString, ToLeanString};
+use std::{borrow::Cow, hint::black_box, sync::Arc};
+
+fn samples() -> Vec<String> {
+    // 15: EcoString max inline
+    // 16: LeanString max inline
+    // 24: CompactString max inline
+    [0, 1, 15, 16, 24, 25, 256].iter().map(|&n| ascii(n)).collect()
+}
 
 fn construct(c: &mut Criterion) {
     let mut group = c.benchmark_group("Construct");
@@ -40,6 +46,9 @@ fn construct_from_static(c: &mut Criterion) {
         });
         group.bench_with_input(BenchmarkId::new("CompactString", kind), &kind, |b, _| {
             b.iter(|| CompactString::const_new(black_box(s)))
+        });
+        group.bench_with_input(BenchmarkId::new("Cow<'static, str>", kind), &kind, |b, _| {
+            b.iter(|| Cow::<'static, str>::from(black_box(s)))
         });
     }
     group.finish();
@@ -83,12 +92,13 @@ fn cow_write(c: &mut Criterion) {
                 b.iter_batched(
                     || shared.clone(),
                     |mut s| {
-                        s.push_str("!");
+                        s.push_str(black_box("abcdefgh"));
                         s
                     },
                     BatchSize::SmallInput,
                 )
             });
+            black_box(shared);
         }
     }
     group.finish();
@@ -96,21 +106,19 @@ fn cow_write(c: &mut Criterion) {
 
 fn grow(c: &mut Criterion) {
     let mut group = c.benchmark_group("Grow");
-    const CHUNK: &str = "abcdefgh";
-    const N: usize = 16;
     duplicate! {
         [
-            label              empty;
-            ["LeanString"]     [LeanString::new()];
-            ["CompactString"]  [CompactString::const_new("")];
-            ["EcoString"]      [EcoString::new()];
-            ["String"]         [String::new()];
+            label              StrTy;
+            ["LeanString"]     [LeanString];
+            ["CompactString"]  [CompactString];
+            ["EcoString"]      [EcoString];
+            ["String"]         [String];
         ]
         group.bench_function(label, |b| {
             b.iter(|| {
-                let mut s = empty;
-                for _ in 0..N {
-                    s.push_str(black_box(CHUNK));
+                let mut s = StrTy::default();
+                for _ in 0..black_box(16) {
+                    s.push_str(black_box("abcdefgh"));
                 }
                 s
             })
@@ -161,47 +169,27 @@ fn eq(c: &mut Criterion) {
                 group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
                     b.iter(|| black_box(&lhs) == black_box(&rhs))
                 });
-                let one = black_box(StrTy::from(s.as_str()));
-                let two = black_box(one.clone());
-                group.bench_with_input(BenchmarkId::new(format!("{}/cloned", &label), len), &len, |b, _| {
-                    b.iter(|| black_box(&one) == black_box(&two) )
-                });
             }
         }
     }
     group.finish();
 }
 
-fn ne(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Not eq");
+fn eq_cloned(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Eq/cloned");
     for s in samples() {
-        if s.is_empty() {
-            continue;
-        }
         let len = s.len();
-        let other = differ_at_last(&s);
         duplicate! {
             [
                 label              StrTy;
                 ["LeanString"]     [LeanString];
-                ["CompactString"]  [CompactString];
                 ["EcoString"]      [EcoString];
-                ["String"]         [String];
             ]
             {
                 let lhs = black_box(StrTy::from(s.as_str()));
-                let rhs = black_box(StrTy::from(other.as_str()));
+                let rhs = black_box(lhs.clone());
                 group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
-                    b.iter(|| black_box(lhs != rhs))
-                });
-                let one = black_box(StrTy::from(s.as_str()));
-                let two = {
-                    let mut x = black_box(one.clone());
-                    x.pop();
-                    x
-                };
-                group.bench_with_input(BenchmarkId::new(format!("{}/cloned", &label), len), &len, |b, _| {
-                    b.iter(|| black_box(&one) == black_box(&two) )
+                    b.iter(|| black_box(&lhs) == black_box(&rhs))
                 });
             }
         }
@@ -242,7 +230,7 @@ criterion_group!(
     grow,
     access,
     eq,
-    ne,
+    eq_cloned,
     construct_from_static,
     numbers
 );

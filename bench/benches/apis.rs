@@ -1,10 +1,13 @@
 //! LeanString hot paths: in-development version vs. last release (`lean_string_prev`), std as floor.
 
-use std::hint::black_box;
-
-use bench::{STATIC_STR_16, STATIC_STR_40, ascii, differ_at_last, samples};
+use bench::{STATIC_STR_16, STATIC_STR_40, ascii};
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use duplicate::duplicate;
+use std::{borrow::Cow, hint::black_box};
+
+fn samples() -> Vec<String> {
+    [0, 1, 15, 16, 17, 256].iter().map(|&n| ascii(n)).collect()
+}
 
 fn from(c: &mut Criterion) {
     let mut group = c.benchmark_group("from");
@@ -31,14 +34,17 @@ fn from_static_str(c: &mut Criterion) {
     for (kind, s) in [("short", STATIC_STR_16), ("long", STATIC_STR_40)] {
         duplicate! {
             [
-                label         krate;
-                ["current"]   [lean_string];
-                ["prev"]      [lean_string_prev];
+                label         LeanString;
+                ["current"]   [lean_string::LeanString];
+                ["prev"]      [lean_string_prev::LeanString];
             ]
             group.bench_with_input(BenchmarkId::new(label, kind), &kind, |b, _| {
-                b.iter(|| krate::LeanString::from_static_str(black_box(s)))
+                b.iter(|| LeanString::from_static_str(black_box(s)))
             });
         }
+        group.bench_with_input(BenchmarkId::new("std", kind), &kind, |b, _| {
+            b.iter(|| Cow::<'static, str>::from(black_box(s)))
+        });
     }
     group.finish();
 }
@@ -114,20 +120,18 @@ fn reserve(c: &mut Criterion) {
 
 fn push_str(c: &mut Criterion) {
     let mut group = c.benchmark_group("push_str");
-    const CHUNK: &str = "abcdefgh";
-    const N: usize = 16;
     duplicate! {
         [
-            label         empty;
-            ["current"]   [lean_string::LeanString::new()];
-            ["prev"]      [lean_string_prev::LeanString::new()];
-            ["std"]       [String::new()];
+            label         StrTy;
+            ["current"]   [lean_string::LeanString];
+            ["prev"]      [lean_string_prev::LeanString];
+            ["std"]       [String];
         ]
         group.bench_function(label, |b| {
             b.iter(|| {
-                let mut s = empty;
-                for _ in 0..N {
-                    s.push_str(black_box(CHUNK));
+                let mut s = StrTy::new();
+                for _ in 0..black_box(16) {
+                    s.push_str(black_box("abcdefgh"));
                 }
                 s
             })
@@ -137,7 +141,7 @@ fn push_str(c: &mut Criterion) {
 }
 
 fn push_str_after_clone(c: &mut Criterion) {
-    let mut group = c.benchmark_group("push_str_after_clone");
+    let mut group = c.benchmark_group("push_str/after_clone");
     let base = ascii(64);
     duplicate! {
         [
@@ -152,12 +156,13 @@ fn push_str_after_clone(c: &mut Criterion) {
                 b.iter_batched(
                     || shared.clone(),
                     |mut s| {
-                        s.push_str("!");
+                        s.push_str(black_box("abcdefgh"));
                         s
                     },
                     BatchSize::SmallInput,
                 )
             });
+            black_box(shared);
         }
     }
     group.finish();
@@ -202,25 +207,16 @@ fn eq(c: &mut Criterion) {
                 group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
                     b.iter(|| black_box(&lhs) == black_box(&rhs) )
                 });
-                let one = black_box(StrTy::from(s.as_str()));
-                let two = black_box(one.clone());
-                group.bench_with_input(BenchmarkId::new(format!("{}/cloned", &label), len), &len, |b, _| {
-                    b.iter(|| black_box(&one) == black_box(&two) )
-                });
             }
         }
     }
     group.finish();
 }
 
-fn ne(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ne");
+fn eq_cloned(c: &mut Criterion) {
+    let mut group = c.benchmark_group("eq/cloned");
     for s in samples() {
-        if s.is_empty() {
-            continue;
-        }
         let len = s.len();
-        let other = differ_at_last(&s);
         duplicate! {
             [
                 label         StrTy;
@@ -230,18 +226,9 @@ fn ne(c: &mut Criterion) {
             ]
             {
                 let lhs = black_box(StrTy::from(s.as_str()));
-                let rhs = black_box(StrTy::from(other.as_str()));
+                let rhs = black_box(lhs.clone());
                 group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
                     b.iter(|| black_box(&lhs) == black_box(&rhs) )
-                });
-                let one = black_box(StrTy::from(s.as_str()));
-                let two = {
-                    let mut x = black_box(one.clone());
-                    x.pop();
-                    x
-                };
-                group.bench_with_input(BenchmarkId::new(format!("{}/cloned", &label), len), &len, |b, _| {
-                    b.iter(|| black_box(&one) == black_box(&two) )
                 });
             }
         }
@@ -260,6 +247,6 @@ criterion_group!(
     push_str_after_clone,
     as_str,
     eq,
-    ne
+    eq_cloned,
 );
 criterion_main!(apis);
