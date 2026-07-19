@@ -1,6 +1,6 @@
 use super::ReserveError;
 
-use core::{marker::PhantomData, mem, ptr, slice, str};
+use core::{hint, marker::PhantomData, mem, ptr, slice, str};
 
 #[cfg(not(loom))]
 use core::sync::atomic::{Ordering::*, fence};
@@ -161,14 +161,7 @@ impl<M: Mutability> Repr<M> {
             if MAX_INLINE_SIZE < this { MAX_INLINE_SIZE } else { this }
         };
 
-        let mut len = {
-            // SAFETY: `Repr` has the same size as `[usize; 2]` and is aligned as `usize`
-            let tail = unsafe {
-                let ptr = (self as *const _ as *const usize).add(1);
-                usize::from_le(*ptr)
-            };
-            tail & (usize::MAX >> 8)
-        };
+        let mut len = self.tail_word() & (usize::MAX >> 8);
 
         // This code is compiled to a single branchless instruction, such as `cmov`
         if last_byte < LastByte::HeapMarker as u8 {
@@ -297,53 +290,96 @@ impl<M: Mutability> Repr<M> {
     }
 
     #[inline(always)]
+    const fn is_inline_buffer(&self) -> bool {
+        self.last_byte() < LastByte::HeapMarker as u8
+    }
+
+    #[inline(always)]
     const fn from_inline(buffer: InlineBuffer) -> Self {
-        unsafe { mem::transmute(buffer) }
+        let repr: Self = unsafe { mem::transmute(buffer) };
+        // SAFETY: We just transmuted from `InlineBuffer`, which is always tagged `InlineMarker`.
+        unsafe { hint::assert_unchecked(repr.is_inline_buffer()) };
+        repr
     }
 
     #[inline(always)]
     const fn from_heap(buffer: HeapBuffer<M>) -> Self {
-        unsafe { mem::transmute(buffer) }
+        let repr: Self = unsafe { mem::transmute(buffer) };
+        // SAFETY: We just transmuted from `HeapBuffer`, which is always tagged `HeapMarker`.
+        unsafe { hint::assert_unchecked(repr.is_heap_buffer()) };
+        repr
     }
 
     #[inline(always)]
     const fn from_static(buffer: StaticBuffer) -> Self {
-        unsafe { mem::transmute(buffer) }
+        let repr: Self = unsafe { mem::transmute(buffer) };
+        // SAFETY: We just transmuted from `StaticBuffer`, which is always tagged `StaticMarker`.
+        unsafe { hint::assert_unchecked(repr.is_static_buffer()) };
+        repr
     }
 
     #[inline(always)]
     const fn last_byte(&self) -> u8 {
-        self.2 as u8
+        let last_byte = self.2 as u8;
+        // NOTE: The optimizer does not realize that this byte read overlaps a word read, such as
+        //       `tail_word()`. Stating this identity allows it to reason at both byte and word
+        //       granularities, which promotes better codegen.
+        // SAFETY: `last_byte` is stored as the top byte of `tail_word`.
+        unsafe {
+            hint::assert_unchecked(last_byte as usize == self.tail_word() >> (usize::BITS - 8))
+        };
+        last_byte
+    }
+
+    #[inline(always)]
+    const fn tail_word(&self) -> usize {
+        // SAFETY: `Repr` has the same size as `[usize; 2]` and is aligned as `usize`
+        unsafe { usize::from_le(*(self as *const _ as *const usize).add(1)) }
     }
 
     #[inline(always)]
     unsafe fn as_inline_buffer_mut(&mut self) -> &mut InlineBuffer {
-        // SAFETY: A `Repr` is transmuted from `InlineBuffer`
-        unsafe { &mut *(self as *mut _ as *mut InlineBuffer) }
+        // SAFETY: The caller guarantees `self` is an `InlineBuffer`.
+        unsafe {
+            hint::assert_unchecked(self.is_inline_buffer());
+            &mut *(self as *mut _ as *mut InlineBuffer)
+        }
     }
 
     #[inline(always)]
     const unsafe fn as_heap_buffer(&self) -> &HeapBuffer<M> {
-        // SAFETY: A `Repr` is transmuted from `HeapBuffer`
-        unsafe { &*(self as *const _ as *const HeapBuffer<M>) }
+        // SAFETY: The caller guarantees `self` is a `HeapBuffer`.
+        unsafe {
+            hint::assert_unchecked(self.is_heap_buffer());
+            &*(self as *const _ as *const HeapBuffer<M>)
+        }
     }
 
     #[inline(always)]
     unsafe fn as_heap_buffer_mut(&mut self) -> &mut HeapBuffer<M> {
-        // SAFETY: A `Repr` is transmuted from `HeapBuffer`
-        unsafe { &mut *(self as *mut _ as *mut HeapBuffer<M>) }
+        // SAFETY: The caller guarantees `self` is a `HeapBuffer`.
+        unsafe {
+            hint::assert_unchecked(self.is_heap_buffer());
+            &mut *(self as *mut _ as *mut HeapBuffer<M>)
+        }
     }
 
     #[inline(always)]
     const unsafe fn as_static_buffer(&self) -> &StaticBuffer {
-        // SAFETY: A `Repr` is transmuted from `StaticBuffer`
-        unsafe { &*(self as *const _ as *const StaticBuffer) }
+        // SAFETY: The caller guarantees `self` is a `StaticBuffer`.
+        unsafe {
+            hint::assert_unchecked(self.is_static_buffer());
+            &*(self as *const _ as *const StaticBuffer)
+        }
     }
 
     #[inline(always)]
     unsafe fn as_static_buffer_mut(&mut self) -> &mut StaticBuffer {
-        // SAFETY: A `Repr` is transmuted from `StaticBuffer`
-        unsafe { &mut *(self as *mut _ as *mut StaticBuffer) }
+        // SAFETY: The caller guarantees `self` is a `StaticBuffer`.
+        unsafe {
+            hint::assert_unchecked(self.is_static_buffer());
+            &mut *(self as *mut _ as *mut StaticBuffer)
+        }
     }
 }
 
