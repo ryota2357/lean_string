@@ -3,6 +3,7 @@ name = "lean_string"
 description = "Compact, clone-on-write string."
 version = "0.6.1"
 edition = "2024"
+rust-version = "1.85.1"
 authors = ["ryota2357"]
 repository = "https://github.com/ryota2357/lean_string"
 readme = "README.md"
