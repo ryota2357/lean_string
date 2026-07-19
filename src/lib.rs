@@ -64,6 +64,11 @@ impl LeanString {
 
     /// Creates a new [`LeanString`] from a `&'static str`.
     ///
+    /// # Panics
+    ///
+    /// Panics if the length of `text` is greater than `2^56 - 1` on 64-bit architecture, or
+    /// `2^24 - 1` on 32-bit architecture.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1112,6 +1117,11 @@ impl LeanStr {
     }
 
     /// Creates a new [`LeanStr`] from a `&'static str`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of `text` is greater than `2^56 - 1` on 64-bit architecture, or
+    /// `2^24 - 1` on 32-bit architecture.
     ///
     /// # Examples
     ///
