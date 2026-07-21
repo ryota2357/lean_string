@@ -731,7 +731,7 @@ mod internal {
     /// Maximum capacity is limited to:
     ///
     /// - (on 64-bit architecture) 2^56 - 1
-    /// - (on 32-bit architecture) 2^32 - 1
+    /// - (on 32-bit architecture) 2^31 - 1
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     pub(super) struct Capacity(usize);
 
@@ -739,6 +739,11 @@ mod internal {
         pub(crate) fn new(capacity: usize) -> Result<Self, ReserveError> {
             #[cfg(target_pointer_width = "64")]
             if capacity > MAX_LEN {
+                cold_path();
+                return Err(ReserveError);
+            }
+            #[cfg(target_pointer_width = "32")]
+            if capacity > (isize::MAX as usize) {
                 cold_path();
                 return Err(ReserveError);
             }
