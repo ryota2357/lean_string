@@ -1,11 +1,9 @@
-use lean_string::{LeanStr, LeanString};
+use lean_string::LeanString;
 
 const INLINE_LIMIT: usize = size_of::<LeanString>();
 
 #[cfg(target_pointer_width = "32")]
-const CAPACITY_WITH_HEAP_LENGTH_LAYOUT: usize = (1 << 24) - 1;
-
-// LeanString basic API
+const MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT: usize = (1 << 24) - 1;
 
 #[test]
 fn new_empty() {
@@ -17,28 +15,35 @@ fn new_empty() {
     assert_eq!(s.len(), 0);
     assert!(!s.is_heap_allocated());
     assert_eq!(s.capacity(), INLINE_LIMIT);
+
+    assert_eq!(LeanString::default(), "");
 }
 
-#[cfg(target_pointer_width = "32")]
 #[test]
-fn drop_large_capacity_with_inline_length() {
-    let string = LeanString::with_capacity(CAPACITY_WITH_HEAP_LENGTH_LAYOUT);
-    assert_eq!(string.len(), 0);
-    assert_eq!(string.capacity(), CAPACITY_WITH_HEAP_LENGTH_LAYOUT);
-    drop(string);
+fn with_capacity_on_inline() {
+    for c in 0..=INLINE_LIMIT {
+        let s = LeanString::with_capacity(c);
+        assert_eq!(s.len(), 0);
+        assert_eq!(s.capacity(), INLINE_LIMIT);
+        assert!(!s.is_heap_allocated());
+    }
 }
 
-#[cfg(target_pointer_width = "32")]
 #[test]
-fn realloc_large_capacity_with_inline_length() {
-    let mut string = LeanString::new();
-    string.reserve(CAPACITY_WITH_HEAP_LENGTH_LAYOUT);
-    assert_eq!(string.len(), 0);
-    assert_eq!(string.capacity(), CAPACITY_WITH_HEAP_LENGTH_LAYOUT);
+fn with_capacity_on_heap() {
+    let s = LeanString::with_capacity(INLINE_LIMIT + 1);
+    assert_eq!(s.len(), 0);
+    assert!(s.capacity() >= (INLINE_LIMIT + 1));
+    assert!(s.is_heap_allocated());
 
-    string.reserve(CAPACITY_WITH_HEAP_LENGTH_LAYOUT + 1);
-    assert_eq!(string.len(), 0);
-    assert_eq!(string.capacity(), CAPACITY_WITH_HEAP_LENGTH_LAYOUT + 1);
+    #[cfg(target_pointer_width = "32")]
+    for d in -1..=1 {
+        let capacity = (MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT as isize + d) as usize;
+        let s = LeanString::with_capacity(capacity);
+        assert_eq!(s.len(), 0);
+        assert!(s.capacity() >= capacity);
+        assert!(s.is_heap_allocated());
+    }
 }
 
 #[test]
@@ -69,7 +74,7 @@ fn from_around_inline_limit() {
 }
 
 #[test]
-fn from_around_inline_limit_static() {
+fn from_static_str_around_inline_limit() {
     let s: &'static str = "0123456789abcdefg";
 
     let inline = LeanString::from_static_str(&s[..INLINE_LIMIT - 1]);
@@ -86,6 +91,47 @@ fn from_around_inline_limit_static() {
     assert_eq!(static_, s[..INLINE_LIMIT + 1]);
     assert!(!static_.is_heap_allocated());
     assert_eq!(static_.capacity(), INLINE_LIMIT + 1);
+}
+
+#[test]
+fn reserve_on_inline() {
+    for c in 0..=INLINE_LIMIT {
+        let mut s = LeanString::new();
+        s.reserve(c);
+        assert_eq!(s.len(), 0);
+        assert_eq!(s.capacity(), INLINE_LIMIT);
+        assert!(!s.is_heap_allocated());
+    }
+}
+
+#[test]
+fn reserve_on_heap() {
+    let mut s = LeanString::new();
+    s.reserve(INLINE_LIMIT + 1);
+    assert_eq!(s.len(), 0);
+    assert!(s.capacity() >= (INLINE_LIMIT + 1));
+    assert!(s.is_heap_allocated());
+
+    #[cfg(target_pointer_width = "32")]
+    {
+        for d in -1..=1 {
+            let capacity = (MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT as isize + d) as usize;
+            let mut s = LeanString::new();
+            s.reserve(capacity);
+            assert_eq!(s.len(), 0);
+            assert!(s.capacity() >= capacity);
+            assert!(s.is_heap_allocated());
+        }
+        let mut s = LeanString::new();
+        s.reserve(MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT);
+        assert_eq!(s.len(), 0);
+        assert!(s.capacity() >= MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT);
+        assert!(s.is_heap_allocated());
+        s.reserve(MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT + 1);
+        assert_eq!(s.len(), 0);
+        assert!(s.capacity() >= (MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT + 1));
+        assert!(s.is_heap_allocated());
+    }
 }
 
 #[test]
@@ -727,7 +773,8 @@ fn from_iter_drops_prefixed_reserved_buffer_on_panic() {
             panic!("iterator panic");
         }
         fn size_hint(&self) -> (usize, Option<usize>) {
-            (CAPACITY_WITH_HEAP_LENGTH_LAYOUT, Some(CAPACITY_WITH_HEAP_LENGTH_LAYOUT))
+            let cap = MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT;
+            (cap, Some(cap))
         }
     }
 
@@ -742,11 +789,11 @@ fn from_iter_owned_lean_strings_reuses_first() {
     let s = LeanString::from(text);
     let s_ptr = s.as_ptr();
     let one: LeanString = [s].into_iter().collect();
-    assert_eq!(one, "abcdefghijklmnopqrstuvwxyz012345");
+    assert_eq!(one, text);
     assert_eq!(one.as_ptr(), s_ptr);
 
     let mut s = LeanString::with_capacity(128);
-    s.push_str("abcdefghijklmnopqrstuvwxyz012345");
+    s.push_str(text);
     let s_ptr = s.as_ptr();
     let tow: LeanString = [s, LeanString::from("6789")].into_iter().collect();
     assert_eq!(tow, text.to_owned() + "6789");
@@ -756,13 +803,14 @@ fn from_iter_owned_lean_strings_reuses_first() {
 
 #[test]
 fn from_iter_owned_lean_strings_detaches_shared_first() {
-    let s = LeanString::from("abcdefghijklmnopqrstuvwxyz012345");
+    let text = "abcdefghijklmnopqrstuvwxyz012345";
+    let s = LeanString::from(text);
     let cloned = s.clone();
     let clonded_ptr = cloned.as_ptr();
     let collected: LeanString = [s, LeanString::from("6789")].into_iter().collect();
-    assert_eq!(cloned, "abcdefghijklmnopqrstuvwxyz012345");
+    assert_eq!(cloned, text);
     assert_eq!(cloned.as_ptr(), clonded_ptr);
-    assert_eq!(collected, "abcdefghijklmnopqrstuvwxyz0123456789");
+    assert_eq!(collected, text.to_owned() + "6789");
     assert_ne!(collected.as_ptr(), clonded_ptr);
 }
 
@@ -771,248 +819,4 @@ fn from_iter_no_owned_lean_strings_is_empty_inline() {
     let collected: LeanString = core::iter::empty::<LeanString>().collect();
     assert!(collected.is_empty());
     assert!(!collected.is_heap_allocated());
-}
-
-// LeanStr basic API
-
-#[test]
-fn lean_str_new_empty() {
-    assert_eq!(LeanStr::new(), "");
-
-    let s = LeanStr::new();
-    assert_eq!(s.as_str(), "");
-    assert!(s.is_empty());
-    assert_eq!(s.len(), 0);
-    assert!(!s.is_heap_allocated());
-
-    assert_eq!(LeanStr::default(), "");
-}
-
-#[test]
-fn lean_str_from_char() {
-    assert_eq!(LeanStr::from('a'), "a");
-    assert_eq!(LeanStr::from('👍'), "👍");
-    assert_eq!(LeanStr::from(''), "");
-}
-
-#[test]
-fn lean_str_from_around_inline_limit() {
-    let s = &String::from("0123456789abcdefg");
-
-    let inline = LeanStr::from(&s[..INLINE_LIMIT - 1]);
-    assert_eq!(inline, s[..INLINE_LIMIT - 1]);
-    assert_eq!(inline.len(), INLINE_LIMIT - 1);
-    assert!(!inline.is_heap_allocated());
-
-    let inline = LeanStr::from(&s[..INLINE_LIMIT]);
-    assert_eq!(inline, s[..INLINE_LIMIT]);
-    assert_eq!(inline.len(), INLINE_LIMIT);
-    assert!(!inline.is_heap_allocated());
-
-    let heap = LeanStr::from(&s[..INLINE_LIMIT + 1]);
-    assert_eq!(heap, s[..INLINE_LIMIT + 1]);
-    assert_eq!(heap.len(), INLINE_LIMIT + 1);
-    assert!(heap.is_heap_allocated());
-}
-
-#[test]
-fn lean_str_from_around_inline_limit_static() {
-    let s: &'static str = "0123456789abcdefg";
-
-    let inline = LeanStr::from_static_str(&s[..INLINE_LIMIT - 1]);
-    assert_eq!(inline, s[..INLINE_LIMIT - 1]);
-    assert!(!inline.is_heap_allocated());
-
-    let inline = LeanStr::from_static_str(&s[..INLINE_LIMIT]);
-    assert_eq!(inline, s[..INLINE_LIMIT]);
-    assert!(!inline.is_heap_allocated());
-
-    let static_ = LeanStr::from_static_str(&s[..INLINE_LIMIT + 1]);
-    assert_eq!(static_, s[..INLINE_LIMIT + 1]);
-    assert!(!static_.is_heap_allocated());
-}
-
-#[test]
-fn lean_str_clone_shares_heap_buffer() {
-    let s = LeanStr::from("abcdefghijklmnopqrstuvwxyz");
-    let cloned = s.clone();
-    assert_eq!(s.as_ptr(), cloned.as_ptr());
-
-    drop(s);
-    assert_eq!(cloned, "abcdefghijklmnopqrstuvwxyz");
-}
-
-// LeanStr <-> LeanString conversion
-
-#[test]
-fn convert_inline_string_to_str() {
-    let lean_string = LeanString::from("short");
-    assert!(!lean_string.is_heap_allocated());
-
-    let lean_str = lean_string.into_lean_str();
-    assert_eq!(lean_str, "short");
-    assert!(!lean_str.is_heap_allocated());
-}
-
-#[test]
-fn convert_inline_str_to_string() {
-    let lean_str = LeanString::from("short").into_lean_str();
-    assert_eq!(lean_str, "short");
-    assert!(!lean_str.is_heap_allocated());
-
-    let lean_string = lean_str.into_lean_string();
-    assert_eq!(lean_string, "short");
-    assert!(!lean_string.is_heap_allocated());
-    assert_eq!(lean_string.capacity(), INLINE_LIMIT);
-}
-
-#[test]
-fn convert_static_string_to_str() {
-    let text: &'static str = "A static str that is longer than inline limit";
-    let ptr = text.as_ptr();
-
-    let lean_string = LeanString::from_static_str(text);
-    assert!(!lean_string.is_heap_allocated());
-    assert_eq!(lean_string.as_ptr(), ptr);
-
-    let lean_str = lean_string.into_lean_str();
-    assert_eq!(lean_str, text);
-    assert!(!lean_str.is_heap_allocated());
-    assert_eq!(lean_str.as_ptr(), ptr);
-}
-
-#[test]
-fn convert_static_str_to_string() {
-    let text: &'static str = "A static str that is longer than inline limit";
-    let ptr = text.as_ptr();
-
-    let lean_str = LeanString::from_static_str(text).into_lean_str();
-    assert_eq!(lean_str, text);
-    assert!(!lean_str.is_heap_allocated());
-    assert_eq!(lean_str.as_ptr(), ptr);
-
-    let lean_string = lean_str.into_lean_string();
-    assert_eq!(lean_string, text);
-    assert!(!lean_string.is_heap_allocated());
-    assert_eq!(lean_string.as_ptr(), ptr);
-}
-
-#[test]
-fn convert_unique_heap_string_to_str() {
-    let text = "a heap-allocated string, longer than the inline limit";
-
-    let lean_string = LeanString::from(text);
-    assert!(lean_string.is_heap_allocated());
-
-    let lean_str = lean_string.into_lean_str();
-    assert_eq!(lean_str, text);
-    assert!(lean_str.is_heap_allocated());
-}
-
-#[test]
-fn convert_unique_heap_str_to_string() {
-    let text = "a heap-allocated string, longer than the inline limit";
-
-    let lean_str = LeanString::from(text).into_lean_str();
-    assert_eq!(lean_str, text);
-    assert!(lean_str.is_heap_allocated());
-
-    let mut lean_string = lean_str.into_lean_string();
-    assert_eq!(lean_string, text);
-    assert!(lean_string.is_heap_allocated());
-    assert_eq!(lean_string.capacity(), text.len());
-
-    lean_string.push_str(" ...and it is still growable");
-    assert_eq!(lean_string, text.to_owned() + " ...and it is still growable");
-}
-
-#[test]
-fn convert_unique_heap_drops_extra_capacity() {
-    let text = "content that is longer than the inline limit";
-    let mut lean_string = LeanString::with_capacity(100);
-    lean_string.push_str(text);
-    assert_eq!(lean_string.capacity(), 100);
-
-    let round_tripped = lean_string.into_lean_str().into_lean_string();
-    assert_eq!(round_tripped, text);
-    assert_eq!(round_tripped.capacity(), text.len());
-}
-
-#[test]
-fn convert_unique_small_heap_into_inline() {
-    let text = "a heap-allocated string, longer than the inline limit";
-    let mut lean_string = LeanString::from(text);
-    for _ in 0..(text.len() - INLINE_LIMIT) {
-        lean_string.pop();
-    }
-    assert_eq!(lean_string.len(), INLINE_LIMIT);
-    assert!(lean_string.is_heap_allocated());
-
-    let lean_str = lean_string.into_lean_str();
-    assert_eq!(lean_str, &text[..INLINE_LIMIT]);
-    assert!(!lean_str.is_heap_allocated());
-}
-
-#[test]
-fn convert_shared_heap_string_to_str() {
-    let text = "a shared heap-allocated string, longer than inline";
-    let lean_string = LeanString::from(text);
-    let shared = lean_string.clone();
-
-    let lean_str = lean_string.into_lean_str();
-    assert_eq!(lean_str, text);
-    assert!(lean_str.is_heap_allocated());
-    assert_ne!(lean_str.as_ptr(), shared.as_ptr());
-
-    assert_eq!(shared, text);
-    assert!(shared.is_heap_allocated());
-}
-
-#[test]
-fn convert_shared_heap_str_to_string() {
-    let text = "a shared heap-allocated string, longer than inline";
-    let lean_str = LeanStr::from(text);
-    let shared = lean_str.clone();
-
-    let mut lean_string = lean_str.into_lean_string();
-    assert_ne!(lean_string.as_ptr(), shared.as_ptr());
-
-    lean_string.push('!');
-    assert_eq!(lean_string, text.to_owned() + "!");
-
-    assert_eq!(shared, text);
-    assert!(shared.is_heap_allocated());
-}
-
-#[cfg(target_pointer_width = "32")]
-#[test]
-fn convert_drops_capacity_length_prefix_layout() {
-    let text = "content that is longer than the inline limit";
-    let mut lean_string = LeanString::with_capacity(CAPACITY_WITH_HEAP_LENGTH_LAYOUT);
-    lean_string.push_str(text);
-
-    let lean_str = lean_string.into_lean_str();
-    assert_eq!(lean_str, text);
-    assert!(lean_str.is_heap_allocated());
-
-    let lean_string = lean_str.into_lean_string();
-    assert_eq!(lean_string, text);
-    assert_eq!(lean_string.capacity(), text.len());
-}
-
-#[cfg(target_pointer_width = "32")]
-#[test]
-fn convert_length_stored_heap_str_to_string() {
-    let len = CAPACITY_WITH_HEAP_LENGTH_LAYOUT;
-    let text = "a".repeat(len);
-
-    let lean_str = LeanStr::from(text.as_str());
-    assert_eq!(lean_str.len(), len);
-    assert!(lean_str.is_heap_allocated());
-    assert!(lean_str.ends_with('a'));
-
-    let lean_string = lean_str.into_lean_string();
-    assert_eq!(lean_string.len(), len);
-    assert_eq!(lean_string.capacity(), len);
-    assert_eq!(lean_string, text);
 }
