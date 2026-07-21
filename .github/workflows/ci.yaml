@@ -39,11 +39,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install cargo-msrv
-        run: cargo install cargo-msrv --locked
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-hack
 
       - name: Verify MSRV
-        run: cargo msrv verify -- cargo check --all-features
+        run: cargo hack check --rust-version --all-features
 
   test:
     name: Test
