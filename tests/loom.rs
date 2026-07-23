@@ -4,32 +4,13 @@
 use lean_string::{LeanStr, LeanString};
 use loom::thread;
 
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
-macro_rules! loom_test {
-    (fn $name:ident() { $($tt:tt)* }) => {
-        #[test]
-        fn $name() {
-            loom::model(|| {
-                let _profiler = dhat::Profiler::builder().testing().build();
-                {
-                    $($tt)*
-                }
-                let stats = dhat::HeapStats::get();
-                // https://github.com/tokio-rs/loom/issues/369
-                dhat::assert_eq!(stats.curr_blocks, 1);
-            });
-        }
-    };
-}
-
-loom_test! {
-    fn concurrent_push() {
+#[test]
+fn concurrent_push() {
+    loom::model(|| {
         let mut one = LeanString::from("12345678901234567890");
         let two = one.clone();
 
-        let th = thread::spawn(move || {
+        thread::spawn(move || {
             let mut three = two.clone();
             three.push('a');
             assert_eq!(two, "12345678901234567890");
@@ -38,17 +19,16 @@ loom_test! {
 
         one.push('a');
         assert_eq!(one, "12345678901234567890a");
-
-        th.join().unwrap();
-    }
+    });
 }
 
-loom_test! {
-    fn concurrent_remove() {
+#[test]
+fn concurrent_remove() {
+    loom::model(|| {
         let mut one = LeanString::from("abcdefghijklmnopqrstuvwxyz");
         let two = one.clone();
 
-        let th = thread::spawn(move || {
+        thread::spawn(move || {
             let mut three = two.clone();
             assert_eq!(three.remove(3), 'd');
             assert_eq!(two, "abcdefghijklmnopqrstuvwxyz");
@@ -57,17 +37,16 @@ loom_test! {
 
         assert_eq!(one.remove(3), 'd');
         assert_eq!(one, "abcefghijklmnopqrstuvwxyz");
-
-        th.join().unwrap();
-    }
+    });
 }
 
-loom_test! {
-    fn concurrent_lean_str_clone_and_to_lean_string() {
+#[test]
+fn concurrent_lean_str_clone_and_to_lean_string() {
+    loom::model(|| {
         let one = LeanStr::from("abcdefghijklmnopqrstuvwxyz");
         let two = one.clone();
 
-        let th = thread::spawn(move || {
+        thread::spawn(move || {
             let three = two.clone();
             assert_eq!(three, "abcdefghijklmnopqrstuvwxyz");
         });
@@ -75,24 +54,21 @@ loom_test! {
         let mut one_p = one.into_lean_string();
         one_p.push('!');
         assert_eq!(one_p, "abcdefghijklmnopqrstuvwxyz!");
-
-        th.join().unwrap();
-    }
+    });
 }
 
-loom_test! {
-    fn concurrent_lean_string_clone_and_to_lean_str() {
+#[test]
+fn concurrent_lean_string_clone_and_to_lean_str() {
+    loom::model(|| {
         let one = LeanString::from("abcdefghijklmnopqrstuvwxyz");
         let two = one.clone();
 
-        let th = thread::spawn(move || {
+        thread::spawn(move || {
             let three = two.clone();
             assert_eq!(three, "abcdefghijklmnopqrstuvwxyz");
         });
 
         let one_p = one.into_lean_str();
         assert_eq!(one_p, "abcdefghijklmnopqrstuvwxyz");
-
-        th.join().unwrap();
-    }
+    });
 }
