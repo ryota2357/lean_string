@@ -7,7 +7,7 @@ edition = "2024"
 duplicate = "2.0.1"
 criterion = { version = "0.8", features = ["html_reports"] }
 lean_string = { path = "../" }
-lean_string_prev = { package = "lean_string", version = "=0.6.1" }
+lean_string_prev = { package = "lean_string", version = "=0.7.0" }
 compact_str = "=0.10.0"
 ecow = "=0.3.0"
 
