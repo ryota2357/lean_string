@@ -279,6 +279,26 @@ impl<M: Mutability> Repr<M> {
         *self = other;
     }
 
+    /// [`Drop`] implementation for `Repr`.
+    ///
+    /// NOTE: DO NOT implement [`Drop`] for `Repr`. Keeping `Repr` free of drop glue lets us handle
+    /// it without worrying about implicitly inserted drops or `ManuallyDrop` wrappers.
+    ///
+    /// # Safety
+    ///
+    /// - Must be called from the [`Drop`] implementation of a newtype wrapping `Repr`.
+    /// - After calling this method, `self` must never be accessed again.
+    #[inline]
+    pub(crate) unsafe fn drop_in(&mut self) {
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked the discriminant to make sure we're heap allocated
+            let heap = unsafe { self.as_heap_buffer_mut() };
+            // SAFETY: From `#Safety`, `self` is being dropped, so neither `self` nor `heap` is
+            // accessed again.
+            unsafe { heap.release() };
+        }
+    }
+
     #[inline(always)]
     pub(crate) const fn is_heap_buffer(&self) -> bool {
         self.last_byte() == LastByte::HeapMarker as u8

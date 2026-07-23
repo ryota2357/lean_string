@@ -212,11 +212,15 @@ impl<H: Header> HeapBuffer<H> {
         // Same as `Arc::drop`: `fetch_sub(1, Release)` ensures all prior accesses from other
         // threads are visible before we might deallocate.
         if self.reference_count().fetch_sub(1, Release) == 1 {
-            // And the `Acquire` fence ensures we see all writes before freeing the memory.
-            fence(Acquire);
+            #[cold]
+            fn on_last_reference<H: Header>(this: &mut HeapBuffer<H>) {
+                // And the `Acquire` fence ensures we see all writes before freeing the memory.
+                fence(Acquire);
 
-            // SAFETY: The old value of `fetch_sub` was `1`, so now it is `0`. no other references exist.
-            unsafe { self.dealloc() };
+                // SAFETY: The old value of `fetch_sub` was `1`, so now it is `0`. no other references exist.
+                unsafe { this.dealloc() };
+            }
+            on_last_reference(self);
         }
     }
 

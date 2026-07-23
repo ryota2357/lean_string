@@ -1054,15 +1054,13 @@ impl Clone for LeanString {
 
 /// A [`Drop`] implementation for [`LeanString`].
 ///
-/// When the last reference to a [`LeanString`] is dropped:
-/// - If the string is heap-allocated, the heap memory is freed
-/// - The internal state is reset to an empty inline buffer
-///
-/// This ensures no memory leaks occur and all resources are properly cleaned up.
+/// When the last reference to a [`LeanString`] is dropped, its heap allocation (if any) is freed.
 impl Drop for LeanString {
     #[inline]
     fn drop(&mut self) {
-        self.0.replace_inner(Repr::new());
+        // SAFETY: This is the `Drop` implementation of a newtype wrapping `Repr`, and `self.0` is
+        // never accessed again.
+        unsafe { self.0.drop_in() };
     }
 }
 
@@ -1403,7 +1401,9 @@ impl Clone for LeanStr {
 impl Drop for LeanStr {
     #[inline]
     fn drop(&mut self) {
-        self.0.replace_inner(Repr::new());
+        // SAFETY: This is the `Drop` implementation of a newtype wrapping `Repr`, and `self.0` is
+        // never accessed again.
+        unsafe { self.0.drop_in() };
     }
 }
 
