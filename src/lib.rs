@@ -349,9 +349,10 @@ impl LeanString {
 
     /// Reserves capacity for at least `additional` bytes more than the current length.
     ///
-    /// # Note
+    /// If this [`LeanString`] is not unique, it is cloned first, even when its capacity is already
+    /// sufficient, because the reserved capacity must not be shared with others.
     ///
-    /// This method clones the [`LeanString`] if it is not unique.
+    /// Does nothing if `additional` is zero.
     ///
     /// # Panics
     ///
@@ -378,6 +379,19 @@ impl LeanString {
     /// // Now we have a heap storage.
     /// assert!(s.capacity() >= s.len() + 100);
     /// assert!(s.is_heap_allocated());
+    /// ```
+    ///
+    /// Reserving zero bytes does not clone.
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut s = LeanString::from("This is a text the length is more than 16 bytes");
+    /// let shared = s.clone();
+    ///
+    /// s.reserve(0);
+    ///
+    /// // Not cloned: `s` still shares its contents with `shared`.
+    /// assert_eq!(s.as_ptr(), shared.as_ptr());
     /// ```
     #[inline]
     pub fn reserve(&mut self, additional: usize) {

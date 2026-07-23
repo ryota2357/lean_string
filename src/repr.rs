@@ -426,8 +426,18 @@ impl Repr<Mutable> {
         }
     }
 
+    /// Reserves capacity for at least `additional` more bytes.
+    ///
+    /// Does nothing if `additional` is zero. Otherwise, on `Ok`, this method ensures:
+    ///
+    /// - The buffer is not StaticBuffer.
+    /// - If the buffer is HeapBuffer, it must be unique.
     #[inline]
     pub(crate) fn reserve(&mut self, additional: usize) -> Result<(), ReserveError> {
+        if additional == 0 {
+            return Ok(());
+        }
+
         let len = self.len();
         let needed_capacity = len.checked_add(additional).ok_or(ReserveError)?;
 
@@ -564,7 +574,7 @@ impl Repr<Mutable> {
         self.reserve(str_len)?;
 
         // SAFETY:
-        // by calling `self.reserve()`:
+        // by calling `self.reserve()` with `str_len > 0` (`string` is not empty):
         // - We have reserved enough capacity.
         // - The buffer is not StaticBuffer.
         // - If the buffer is HeapBuffer, it must be unique.
@@ -708,9 +718,14 @@ impl Repr<Mutable> {
             "index is not a char boundary or out of bounds (index: {idx})",
         );
 
+        // Nothing to write, and `reserve(0)` below would not make the buffer modifiable.
+        if string.is_empty() {
+            return Ok(());
+        }
+
         let new_len = self.len().checked_add(string.len()).ok_or(ReserveError)?;
 
-        // reserve makes self unique and modifiable
+        // reserve makes self unique and modifiable because `string.len() > 0`
         self.reserve(string.len())?;
         debug_assert!(self.is_unique());
         debug_assert!(!self.is_static_buffer());
