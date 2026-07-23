@@ -2,6 +2,30 @@
 
 <!-- Ref: https://keepachangelog.com/ -->
 
+## [0.7.0] - 2026-07-23
+
+### Added
+
+- `LeanStr`, an immutable version of `LeanString`, based on a design originally proposed by [@charliermarsh](https://github.com/charliermarsh) in [#6](https://github.com/ryota2357/lean_string/pull/6). ([#7](https://github.com/ryota2357/lean_string/pull/7))
+- `LeanString::into_lean_str()` and `LeanStr::into_lean_string()`, with their fallible `try_` variants, to convert between the two types.
+- `ToLeanStr` trait and `ToLeanStrError`, the `LeanStr` counterparts of `ToLeanString` and `ToLeanStringError`.
+- `ToLeanString` and `ToLeanStr` implementations for `str`, so `to_lean_string()` and `to_lean_str()` can be called on an unsized `str`, just as `to_string()` can. Until now they only accepted a `&str`.
+- The MSRV is now declared (Rust 1.85.1) and verified in CI.
+
+### Changed
+
+- **Breaking:** `reserve(0)` and `try_reserve(0)` are now no-ops, and inserting an empty string does nothing beyond checking the index. Neither clones a string shared with others.
+- Replaced the `ryu` dependency with `zmij` for float formatting.
+- Creating a string short enough to be stored inline is significantly faster (about 2x for lengths near the inline limit, measured on aarch64-darwin).
+- Removed a redundant store on drop, making it cheaper to drop many strings at once, such as a `Vec<LeanString>`.
+- Outlined `reserve`'s cold paths, so the common case generates less code at its call sites. ([#5](https://github.com/ryota2357/lean_string/pull/5) by [@charliermarsh](https://github.com/charliermarsh))
+- Removed redundant capacity, allocation size and error checks from `From<&str>`, `from_static_str()`, `into_lean_str()` and `into_lean_string()`.
+
+### Fixed
+
+- Corrected the documented capacity limit on 32-bit architecture: it is `2^31 - 16`, not `2^32 - 1`.
+- Documented the missing panic condition of `from_static_str()`.
+
 ## [0.6.1] - 2026-07-08
 
 Most of the fixes in this release were contributed by [@charliermarsh](https://github.com/charliermarsh). Thank you!
@@ -96,6 +120,7 @@ Initial release.
 - Optional `serde` and `arbitrary` support.
 - `Send` and `Sync` implementations, verified with `loom` and `miri`.
 
+[0.7.0]: https://github.com/ryota2357/lean_string/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/ryota2357/lean_string/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/ryota2357/lean_string/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/ryota2357/lean_string/compare/v0.5.2...v0.5.3
