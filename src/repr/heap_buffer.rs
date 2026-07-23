@@ -732,40 +732,46 @@ mod internal {
 
     /// The capacity of a [`HeapBuffer`].
     ///
-    /// Maximum capacity is limited to:
-    ///
-    /// - (on 64-bit architecture) 2^56 - 1
-    /// - (on 32-bit architecture) 2^31 - 1
+    /// Maximum capacity is limited to [`Capacity::MAX`].
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     pub(super) struct Capacity(usize);
 
     impl Capacity {
+        /// The largest value a [`Capacity`] may hold:
+        ///
+        /// - (on 64-bit architecture) 2^56 - 1
+        /// - (on 32-bit architecture) 2^31 - 1
+        pub(super) const MAX: usize =
+            if cfg!(target_pointer_width = "64") { MAX_LEN } else { isize::MAX as usize };
+
+        #[inline]
         pub(crate) fn new(capacity: usize) -> Result<Self, ReserveError> {
-            #[cfg(target_pointer_width = "64")]
-            if capacity > MAX_LEN {
+            if capacity > Self::MAX {
                 cold_path();
                 return Err(ReserveError);
             }
-            #[cfg(target_pointer_width = "32")]
-            if capacity > (isize::MAX as usize) {
-                cold_path();
-                return Err(ReserveError);
-            }
-            Ok(Capacity(capacity))
+            // SAFETY: We just checked that `capacity` is not greater than `Capacity::MAX`.
+            Ok(unsafe { Capacity::new_unchecked(capacity) })
         }
 
-        /// Creates a `Capacity` from a size that `Capacity::new` has already accepted.
+        /// Creates a `Capacity` without checking the maximum-value invariant.
         ///
         /// # Safety
         ///
-        /// `Capacity::new(capacity)` must return `Ok` for the given value. The maximum-value
-        /// invariant is relied upon to skip overflow checks in layout computations (e.g.
-        /// `HeapBuffer::realloc`).
+        /// `capacity` must not be greater than [`Capacity::MAX`].
+        #[inline(always)]
         pub(super) unsafe fn new_unchecked(capacity: usize) -> Self {
-            debug_assert!(Capacity::new(capacity).is_ok());
+            debug_assert!(capacity <= Self::MAX);
+            // NOTE: Callers that build a `Capacity` out of a length the allocation already
+            //       validated have no range check left in sight, so the optimizer cannot rule out
+            //       an oversized `capacity` and keeps the overflow and `Layout` size checks of
+            //       `layout_for` alive. Restating the bound here is what folds them away.
+            // SAFETY: From `#Safety`, `capacity` is not greater than `Capacity::MAX`.
+            unsafe { hint::assert_unchecked(capacity <= Self::MAX) };
             Capacity(capacity)
         }
 
+        #[inline(always)]
         pub(crate) fn as_usize(&self) -> usize {
             self.0
         }
