@@ -41,11 +41,11 @@ fn test_from_cow_str() {
     assert_eq!(LeanString::from(Cow::Owned(String::from("string"))), "string");
 }
 
-// #[test]
-// fn test_unsized_to_string() {
-//     let s: &str = "abc";
-//     let _: String = (*s).to_string();
-// }
+#[test]
+fn test_unsized_to_string() {
+    let s: &str = "abc";
+    let _: LeanString = (*s).to_lean_string();
+}
 
 #[test]
 fn test_from_utf8() {
