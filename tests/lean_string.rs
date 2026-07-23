@@ -74,6 +74,20 @@ fn from_around_inline_limit() {
 }
 
 #[test]
+fn from_every_inline_length() {
+    // Inlining copies the bytes with a ladder of constant-size copies, one branch per length
+    // range, so every length that fits inline needs to be covered.
+    let s = &String::from("0123456789abcdefg");
+
+    for len in 0..=INLINE_LIMIT {
+        let inline = LeanString::from(&s[..len]);
+        assert_eq!(inline, s[..len], "len: {len}");
+        assert_eq!(inline.len(), len, "len: {len}");
+        assert!(!inline.is_heap_allocated(), "len: {len}");
+    }
+}
+
+#[test]
 fn from_static_str_around_inline_limit() {
     let s: &'static str = "0123456789abcdefg";
 
