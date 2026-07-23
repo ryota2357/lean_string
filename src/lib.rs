@@ -412,10 +412,8 @@ impl LeanString {
     /// The resulting capacity is always greater than `2 * size_of::<usize>()` bytes because
     /// [`LeanString`] has inline (on the stack) storage.
     ///
-    /// # Note
-    ///
-    /// This method clones the [`LeanString`] if it is not unique and its capacity is greater than
-    /// its length.
+    /// If this [`LeanString`] is not unique and its capacity is greater than its length, it is
+    /// cloned first, because the capacity it shares with others must be left as it is.
     ///
     /// # Panics
     ///
@@ -468,9 +466,8 @@ impl LeanString {
     /// The resulting capacity is always greater than `2 * size_of::<usize>()` bytes because the
     /// [`LeanString`] has inline (on the stack) storage.
     ///
-    /// # Note
-    ///
-    /// This method clones the [`LeanString`] if it is not unique and its capacity will be changed.
+    /// If this [`LeanString`] is not unique and its capacity will be changed, it is cloned first,
+    /// because the capacity it shares with others must be left as it is.
     ///
     /// # Panics
     ///
