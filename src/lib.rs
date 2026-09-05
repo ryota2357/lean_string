@@ -602,6 +602,9 @@ impl LeanString {
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
     /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::push_str()`].
+    ///
+    /// On failure, `self` is left unchanged because capacity is reserved before `string` is
+    /// written.
     #[inline]
     pub fn try_push_str(&mut self, string: &str) -> Result<(), ReserveError> {
         self.0.push_str(string)

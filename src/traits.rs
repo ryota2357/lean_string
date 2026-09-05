@@ -1,5 +1,5 @@
 use crate::{
-    LeanStr, LeanString, ToLeanStrError, ToLeanStringError, UnwrapWithMsg,
+    LeanStr, LeanString, ReserveError, ToLeanStrError, ToLeanStringError, UnwrapWithMsg,
     repr::{Immutable, Mutable, Repr},
 };
 use alloc::string::String;
@@ -74,11 +74,7 @@ impl<T: fmt::Display> ToLeanString for T {
             &LeanString as s => return Ok(s.clone()),
             &LeanStr as s => return Ok(s.clone().try_into_lean_string()?),
 
-            s => {
-                let mut buf = LeanString::new();
-                write!(buf, "{}", s)?;
-                return Ok(buf)
-            }
+            s => return try_from_fmt(format_args!("{s}")),
         });
         Ok(LeanString(repr))
     }
@@ -160,9 +156,8 @@ impl<T: fmt::Display> ToLeanStr for T {
             &LeanString as s => return Ok(s.clone().try_into_lean_str()?),
 
             s => {
-                let mut buf = LeanString::new();
-                write!(buf, "{}", s)?;
-                return Ok(buf.try_into_lean_str()?)
+                let string = try_from_fmt::<ToLeanStrError>(format_args!("{s}"))?;
+                return Ok(string.try_into_lean_str()?);
             }
         });
         Ok(LeanStr(repr))
@@ -175,3 +170,34 @@ impl<T: fmt::Display> ToLeanStr for T {
 // These two conditions are also applied to `Repr` which is the only field of `LeanStr`.
 unsafe impl LifetimeFree for LeanStr {}
 unsafe impl LifetimeFree for Repr<Immutable> {}
+
+fn try_from_fmt<E>(args: fmt::Arguments<'_>) -> Result<LeanString, E>
+where
+    E: From<ReserveError> + From<fmt::Error>,
+{
+    if let Some(str) = args.as_str() {
+        return Ok(LeanString::from_static_str(str));
+    }
+
+    struct Writer(Result<LeanString, ReserveError>);
+    impl fmt::Write for Writer {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            let Ok(string) = &mut self.0 else { return Err(fmt::Error) };
+            match string.try_push_str(s) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    self.0 = Err(error);
+                    Err(fmt::Error)
+                }
+            }
+        }
+    }
+
+    let mut writer = Writer(Ok(LeanString::new()));
+    let formatted = writer.write_fmt(args);
+    match (writer.0, formatted) {
+        (Ok(string), Ok(())) => Ok(string),
+        (Err(error), _) => Err(E::from(error)),
+        (_, Err(error)) => Err(E::from(error)),
+    }
+}

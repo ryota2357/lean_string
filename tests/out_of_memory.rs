@@ -1,8 +1,10 @@
-use lean_string::{LeanString, ReserveError};
+use lean_string::{
+    LeanString, ReserveError, ToLeanStr, ToLeanStrError, ToLeanString, ToLeanStringError,
+};
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
-    ptr,
+    fmt, ptr,
 };
 
 // When set, the next allocation (reallocation) attempt made by the current thread fails.
@@ -158,4 +160,62 @@ fn extend_with_empty_iterator_keeps_heap_buffer_shared() {
     assert_eq!(string, TEXT);
     assert_eq!(string.as_ptr(), shared_ptr);
     assert_eq!(shared.as_ptr(), shared_ptr);
+}
+
+#[test]
+fn try_to_lean_s_allocation_failure() {
+    struct PropagatesWriteFailure;
+    impl fmt::Display for PropagatesWriteFailure {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(TEXT)
+        }
+    }
+
+    FAIL_NEXT_ALLOCATION.set(true);
+    let result = PropagatesWriteFailure.try_to_lean_string();
+    FAIL_NEXT_ALLOCATION.set(false);
+    assert_eq!(result, Err(ToLeanStringError::Reserve(ReserveError)));
+
+    FAIL_NEXT_ALLOCATION.set(true);
+    let result = PropagatesWriteFailure.try_to_lean_str();
+    FAIL_NEXT_ALLOCATION.set(false);
+    assert_eq!(result, Err(ToLeanStrError::Reserve(ReserveError)));
+}
+
+#[test]
+fn try_to_lean_s_fails_if_ignore_write_failure() {
+    struct IgnoresWriteFailure;
+    impl fmt::Display for IgnoresWriteFailure {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let _ = f.write_str(TEXT);
+            Ok(())
+        }
+    }
+
+    FAIL_NEXT_ALLOCATION.set(true);
+    let result = IgnoresWriteFailure.try_to_lean_string();
+    FAIL_NEXT_ALLOCATION.set(false);
+    assert_eq!(result, Err(ToLeanStringError::Reserve(ReserveError)));
+
+    FAIL_NEXT_ALLOCATION.set(true);
+    let result = IgnoresWriteFailure.try_to_lean_str();
+    FAIL_NEXT_ALLOCATION.set(false);
+    assert_eq!(result, Err(ToLeanStrError::Reserve(ReserveError)));
+}
+
+#[test]
+fn try_to_lean_s_formatting_failure_is_reported_separately() {
+    struct FailsAfterWriting;
+    impl fmt::Display for FailsAfterWriting {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("written")?;
+            Err(fmt::Error)
+        }
+    }
+
+    let result = FailsAfterWriting.try_to_lean_string();
+    assert_eq!(result, Err(ToLeanStringError::Fmt(fmt::Error)));
+
+    let result = FailsAfterWriting.try_to_lean_str();
+    assert_eq!(result, Err(ToLeanStrError::Fmt(fmt::Error)));
 }
