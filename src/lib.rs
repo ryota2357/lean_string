@@ -232,12 +232,20 @@ impl LeanString {
     /// ```
     #[inline]
     pub fn from_utf16(buf: &[u16]) -> Result<Self, FromUtf16Error> {
-        let mut ret = LeanString::with_capacity(buf.len());
-        for c in char::decode_utf16(buf.iter().copied()) {
-            match c {
-                Ok(c) => ret.push(c),
-                Err(_) => return Err(FromUtf16Error),
-            }
+        Self::from_utf16_units(buf.iter().copied(), buf.len())
+    }
+
+    #[inline]
+    fn from_utf16_units(
+        units: impl Iterator<Item = u16>,
+        capacity: usize,
+    ) -> Result<Self, FromUtf16Error> {
+        let mut ret = LeanString::with_capacity(capacity);
+        for c in char::decode_utf16(units) {
+            let Ok(c) = c else {
+                return Err(FromUtf16Error { kind: FromUtf16ErrorKind::LoneSurrogate });
+            };
+            ret.push(c);
         }
         Ok(ret)
     }
@@ -256,9 +264,162 @@ impl LeanString {
     #[inline]
     #[must_use]
     pub fn from_utf16_lossy(buf: &[u16]) -> Self {
-        char::decode_utf16(buf.iter().copied())
-            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
-            .collect()
+        Self::from_utf16_units_lossy(buf.iter().copied(), buf.len())
+    }
+
+    #[inline]
+    fn from_utf16_units_lossy(units: impl Iterator<Item = u16>, capacity: usize) -> Self {
+        let mut ret = LeanString::with_capacity(capacity);
+        for c in char::decode_utf16(units) {
+            ret.push(c.unwrap_or(char::REPLACEMENT_CHARACTER));
+        }
+        ret
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanString`], returning an error if `buf`
+    /// has an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16le(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x00, 0xD8, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert!(LeanString::from_utf16le(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16le(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        let (chunks, []) = buf.as_chunks::<2>() else {
+            return Err(FromUtf16Error { kind: FromUtf16ErrorKind::OddBytes });
+        };
+        match (cfg!(target_endian = "little"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16(buf),
+            _ => {
+                Self::from_utf16_units(chunks.iter().copied().map(u16::from_le_bytes), chunks.len())
+            }
+        }
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanString`], replacing invalid code
+    /// points with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x1E, 0xDD, 0x69, 0x00,
+    ///     0x63, 0x00, 0x34, 0xD8,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16le_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16le_lossy(buf: &[u8]) -> Self {
+        match (cfg!(target_endian = "little"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16_lossy(buf),
+            (true, ([], buf, [_remainder])) => LeanString::from_utf16_lossy(buf) + "\u{FFFD}",
+            _ => {
+                let (chunks, remainder) = buf.as_chunks::<2>();
+                let string = Self::from_utf16_units_lossy(
+                    chunks.iter().copied().map(u16::from_le_bytes),
+                    chunks.len(),
+                );
+                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+            }
+        }
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanString`], returning an error if `buf`
+    /// has an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16be(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0xD8, 0x00, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert!(LeanString::from_utf16be(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16be(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        let (chunks, []) = buf.as_chunks::<2>() else {
+            return Err(FromUtf16Error { kind: FromUtf16ErrorKind::OddBytes });
+        };
+        match (cfg!(target_endian = "big"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16(buf),
+            _ => {
+                Self::from_utf16_units(chunks.iter().copied().map(u16::from_be_bytes), chunks.len())
+            }
+        }
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanString`], replacing invalid code
+    /// points with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0xDD, 0x1E, 0x00, 0x69,
+    ///     0x00, 0x63, 0xD8, 0x34,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16be_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16be_lossy(buf: &[u8]) -> Self {
+        match (cfg!(target_endian = "big"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16_lossy(buf),
+            (true, ([], buf, [_remainder])) => LeanString::from_utf16_lossy(buf) + "\u{FFFD}",
+            _ => {
+                let (chunks, remainder) = buf.as_chunks::<2>();
+                let string = Self::from_utf16_units_lossy(
+                    chunks.iter().copied().map(u16::from_be_bytes),
+                    chunks.len(),
+                );
+                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+            }
+        }
     }
 
     /// Returns the length of the string in bytes, not [`char`] or graphemes.
@@ -1312,6 +1473,114 @@ impl LeanStr {
     #[must_use]
     pub fn from_utf16_lossy(buf: &[u16]) -> Self {
         LeanString::from_utf16_lossy(buf).into_lean_str()
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanStr`], returning an error if `buf` has
+    /// an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16le(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x00, 0xD8, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert!(LeanStr::from_utf16le(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16le(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        LeanString::from_utf16le(buf).map(|x| x.into_lean_str())
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanStr`], replacing invalid code points
+    /// with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x1E, 0xDD, 0x69, 0x00,
+    ///     0x63, 0x00, 0x34, 0xD8,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16le_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16le_lossy(buf: &[u8]) -> Self {
+        LeanString::from_utf16le_lossy(buf).into_lean_str()
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanStr`], returning an error if `buf` has
+    /// an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16be(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0xD8, 0x00, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert!(LeanStr::from_utf16be(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16be(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        LeanString::from_utf16be(buf).map(|x| x.into_lean_str())
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanStr`], replacing invalid code points
+    /// with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0xDD, 0x1E, 0x00, 0x69,
+    ///     0x00, 0x63, 0xD8, 0x34,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16be_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16be_lossy(buf: &[u8]) -> Self {
+        LeanString::from_utf16be_lossy(buf).into_lean_str()
     }
 
     /// Returns a string slice containing the entire [`LeanStr`].
