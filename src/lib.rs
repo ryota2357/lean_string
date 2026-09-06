@@ -58,6 +58,7 @@ impl LeanString {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn new() -> Self {
         LeanString(Repr::new())
     }
@@ -79,6 +80,7 @@ impl LeanString {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn from_static_str(text: &'static str) -> Self {
         match Repr::from_static_str(text) {
             Ok(repr) => LeanString(repr),
@@ -121,6 +123,7 @@ impl LeanString {
     /// assert!(s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         LeanString::try_with_capacity(capacity).unwrap_with_msg()
     }
@@ -180,6 +183,7 @@ impl LeanString {
     /// assert_eq!(string, "Hello �World");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf8_lossy(buf: &[u8]) -> Self {
         let mut ret = LeanString::with_capacity(buf.len());
         for chunk in buf.utf8_chunks() {
@@ -199,6 +203,7 @@ impl LeanString {
     /// This function is unsafe because it does not check that the bytes passed to it are valid
     /// UTF-8. If this constraint is violated, it may cause memory unsafety issues.
     #[inline]
+    #[must_use]
     pub unsafe fn from_utf8_unchecked(buf: &[u8]) -> Self {
         let str = unsafe { str::from_utf8_unchecked(buf) };
         LeanString::from(str)
@@ -249,6 +254,7 @@ impl LeanString {
     /// assert_eq!(LeanString::from_utf16_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf16_lossy(buf: &[u16]) -> Self {
         char::decode_utf16(buf.iter().copied())
             .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
@@ -269,6 +275,7 @@ impl LeanString {
     /// assert_eq!(fancy_f.chars().count(), 3);
     /// ```
     #[inline]
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.0.len()
     }
@@ -286,6 +293,7 @@ impl LeanString {
     /// assert!(!s.is_empty());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -328,6 +336,7 @@ impl LeanString {
     /// assert_eq!(s.capacity(), 4);
     /// ```
     #[inline]
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.0.capacity()
     }
@@ -342,6 +351,7 @@ impl LeanString {
     /// assert_eq!(s.as_str(), "foo");
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -356,6 +366,7 @@ impl LeanString {
     /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
@@ -822,6 +833,7 @@ impl LeanString {
     /// assert_eq!(s.repeat(0), "");
     /// ```
     #[inline]
+    #[must_use]
     pub fn repeat(&self, n: usize) -> Self {
         self.try_repeat(n).unwrap_with_msg()
     }
@@ -1002,6 +1014,7 @@ impl LeanString {
     /// assert!(s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub fn is_heap_allocated(&self) -> bool {
         self.0.is_heap_buffer()
     }
@@ -1028,6 +1041,7 @@ impl LeanString {
     /// assert_eq!(s, "This is a heap-allocated string!!");
     /// ```
     #[inline]
+    #[must_use]
     pub fn into_lean_str(self) -> LeanStr {
         self.try_into_lean_str().unwrap_with_msg()
     }
@@ -1138,6 +1152,7 @@ impl LeanStr {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn new() -> Self {
         LeanStr(Repr::new())
     }
@@ -1158,6 +1173,7 @@ impl LeanStr {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn from_static_str(text: &'static str) -> Self {
         match Repr::from_static_str(text) {
             Ok(repr) => LeanStr(repr),
@@ -1211,6 +1227,7 @@ impl LeanStr {
     /// assert_eq!(string, "Hello �World");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf8_lossy(buf: &[u8]) -> Self {
         LeanString::from_utf8_lossy(buf).into_lean_str()
     }
@@ -1222,6 +1239,7 @@ impl LeanStr {
     /// This function is unsafe because it does not check that the bytes passed to it are valid
     /// UTF-8. If this constraint is violated, it may cause memory unsafety issues.
     #[inline]
+    #[must_use]
     pub unsafe fn from_utf8_unchecked(buf: &[u8]) -> Self {
         let str = unsafe { str::from_utf8_unchecked(buf) };
         LeanStr::from(str)
@@ -1265,6 +1283,7 @@ impl LeanStr {
     /// assert_eq!(LeanStr::from_utf16_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf16_lossy(buf: &[u16]) -> Self {
         LeanString::from_utf16_lossy(buf).into_lean_str()
     }
@@ -1279,6 +1298,7 @@ impl LeanStr {
     /// assert_eq!(s.as_str(), "foo");
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -1293,6 +1313,7 @@ impl LeanStr {
     /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
@@ -1311,6 +1332,7 @@ impl LeanStr {
     /// assert_eq!(fancy_f.chars().count(), 3);
     /// ```
     #[inline]
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.0.len()
     }
@@ -1325,6 +1347,7 @@ impl LeanStr {
     /// assert!(!LeanStr::from("foo").is_empty());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -1349,6 +1372,7 @@ impl LeanStr {
     /// assert!(s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub fn is_heap_allocated(&self) -> bool {
         self.0.is_heap_buffer()
     }
@@ -1373,6 +1397,7 @@ impl LeanStr {
     /// assert_eq!(s, "This is a heap-allocated string!!");
     /// ```
     #[inline]
+    #[must_use]
     pub fn into_lean_string(self) -> LeanString {
         self.try_into_lean_string().unwrap_with_msg()
     }
