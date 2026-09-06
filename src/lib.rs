@@ -1019,6 +1019,32 @@ impl LeanString {
         self.0.is_heap_buffer()
     }
 
+    /// Returns the underlying `&'static str` if this [`LeanString`] holds one, or `None` otherwise.
+    ///
+    /// Note that strings short enough to be inlined into the local storage will return `None`, even
+    /// if if created with [`LeanString::from_static_str`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let s = LeanString::from_static_str("Long text but static lifetime");
+    /// assert_eq!(s.as_static_str(), Some("Long text but static lifetime"));
+    ///
+    /// // Not holding a `&'static str`.
+    /// let s = LeanString::from("Long text but heap allocated!");
+    /// assert_eq!(s.as_static_str(), None);
+    ///
+    /// // Short enough to be copied into the inline storage.
+    /// let s = LeanString::from_static_str("short");
+    /// assert_eq!(s.as_static_str(), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn as_static_str(&self) -> Option<&'static str> {
+        self.0.as_static_str()
+    }
+
     /// Converts the [`LeanString`] into a [`LeanStr`].
     ///
     /// Inline strings and strings created from a `&'static str` are converted at zero cost.
@@ -1375,6 +1401,32 @@ impl LeanStr {
     #[must_use]
     pub fn is_heap_allocated(&self) -> bool {
         self.0.is_heap_buffer()
+    }
+
+    /// Returns the underlying `&'static str` if this [`LeanStr`] holds one, or `None` otherwise.
+    ///
+    /// Note that strings short enough to be inlined into the local storage will return `None`, even
+    /// if if created with [`LeanStr::from_static_str`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from_static_str("Long text but static lifetime");
+    /// assert_eq!(s.as_static_str(), Some("Long text but static lifetime"));
+    ///
+    /// // Not holding a `&'static str`.
+    /// let s = LeanStr::from("Long text but heap allocated!");
+    /// assert_eq!(s.as_static_str(), None);
+    ///
+    /// // Short enough to be copied into the inline storage.
+    /// let s = LeanStr::from_static_str("short");
+    /// assert_eq!(s.as_static_str(), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn as_static_str(&self) -> Option<&'static str> {
+        self.0.as_static_str()
     }
 
     /// Converts the [`LeanStr`] into a [`LeanString`].
