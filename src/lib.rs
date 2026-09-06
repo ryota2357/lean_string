@@ -627,9 +627,10 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if **any** of the following conditions:
+    /// Panics if **any** of the following conditions is met:
     ///
-    /// 1. `idx` is larger than or equal tothe [`LeanString`]'s length, or if it does not lie on a [`char`]
+    /// 1. `idx` is larger than or equal to the [`LeanString`]'s length, or it does not lie on a
+    ///    [`char`] boundary.
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
     ///
     /// For 2, if you want to handle such a problem manually, use [`LeanString::try_remove()`].
@@ -717,7 +718,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if **any** of the following conditions:
+    /// Panics if **any** of the following conditions is met:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`]
     ///    boundary.
@@ -763,7 +764,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if **any** of the following conditions:
+    /// Panics if **any** of the following conditions is met:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`] boundary.
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
