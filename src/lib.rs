@@ -20,7 +20,7 @@ use core::{
 use alloc::{borrow::Cow, boxed::Box, string::String};
 
 #[cfg(feature = "std")]
-use std::ffi::OsStr;
+use std::{ffi::OsStr, path::Path};
 
 mod repr;
 use repr::{Immutable, Mutable, Repr};
@@ -1547,6 +1547,22 @@ impl AsRef<OsStr> for LeanStr {
     #[inline]
     fn as_ref(&self) -> &OsStr {
         OsStr::new(self.as_str())
+    }
+}
+
+#[cfg(feature = "std")]
+impl AsRef<Path> for LeanString {
+    #[inline]
+    fn as_ref(&self) -> &Path {
+        Path::new(self.as_str())
+    }
+}
+
+#[cfg(feature = "std")]
+impl AsRef<Path> for LeanStr {
+    #[inline]
+    fn as_ref(&self) -> &Path {
+        Path::new(self.as_str())
     }
 }
 
