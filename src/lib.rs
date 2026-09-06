@@ -86,11 +86,10 @@ impl LeanString {
         }
     }
 
-    /// Creates a new empty [`LeanString`] with at least capacity bytes.
+    /// Creates a new empty [`LeanString`] with at least `capacity` bytes.
     ///
-    /// A [`LeanString`] will inline strings if the length is less than or equal to
-    /// `2 * size_of::<usize>()` bytes. This means that the minimum capacity of a [`LeanString`]
-    /// is `2 * size_of::<usize>()` bytes.
+    /// The returned [`LeanString`] has a capacity of at least `2 * size_of::<usize>()` bytes,
+    /// the size of the inline (on the stack) storage.
     ///
     /// # Panics
     ///
@@ -293,9 +292,12 @@ impl LeanString {
 
     /// Returns the capacity of the [`LeanString`], in bytes.
     ///
-    /// A [`LeanString`] will inline strings if the length is less than or equal to
-    /// `2 * size_of::<usize>()` bytes. This means that the minimum capacity of a [`LeanString`]
-    /// is `2 * size_of::<usize>()` bytes.
+    /// # Note
+    ///
+    /// - [`LeanString`] backed by a `&'static str` does not write the underlying byte data, so its
+    ///   capacity matches its current length.
+    /// - Otherwise, it at least `2 * size_of::<usize>()` bytes, which is the size of the inline (on
+    ///   the stack) storage.
     ///
     /// # Examples
     ///
@@ -313,6 +315,17 @@ impl LeanString {
     /// # use lean_string::LeanString;
     /// let s = LeanString::with_capacity(100);
     /// assert_eq!(s.capacity(), 100);
+    /// ```
+    ///
+    /// ## `&'static str` capacity
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut s = LeanString::from_static_str("Long text but static lifetime");
+    /// assert_eq!(s.capacity(), s.len());
+    ///
+    /// s.truncate(4);
+    /// assert_eq!(s.capacity(), 4);
     /// ```
     #[inline]
     pub fn capacity(&self) -> usize {
@@ -409,8 +422,8 @@ impl LeanString {
 
     /// Shrinks the capacity of the [`LeanString`] to match its length.
     ///
-    /// The resulting capacity is always greater than `2 * size_of::<usize>()` bytes because
-    /// [`LeanString`] has inline (on the stack) storage.
+    /// Only a heap buffer can shrink. This is a no-op for a [`LeanString`] stored inline or
+    /// backed by a `&'static str`.
     ///
     /// If this [`LeanString`] is not unique and its capacity is greater than its length, it is
     /// cloned first, because the capacity it shares with others must be left as it is.
@@ -463,8 +476,8 @@ impl LeanString {
 
     /// Shrinks the capacity of the [`LeanString`] with a lower bound.
     ///
-    /// The resulting capacity is always greater than `2 * size_of::<usize>()` bytes because the
-    /// [`LeanString`] has inline (on the stack) storage.
+    /// Only a heap buffer can shrink. This is a no-op for a [`LeanString`] stored inline or
+    /// backed by a `&'static str`.
     ///
     /// If this [`LeanString`] is not unique and its capacity will be changed, it is cloned first,
     /// because the capacity it shares with others must be left as it is.
