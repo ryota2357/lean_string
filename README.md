@@ -22,7 +22,7 @@ Compact, clone-on-write string.
 - `O(1)`, zero allocation construction from `&'static str`.
 - Heap based string grows at a rate of 1.5x
   - The std library String grows at a rate of 2x
-- Nich optimized for `Option<LeanString>`.
+- Niche optimized for `Option<LeanString>`.
   - `size_of::<Option<LeanString>>() == size_of::<LeanString>()`
 - High API compatibility for `String`.
 - Supports `no_std` environment.
@@ -53,24 +53,24 @@ assert_eq!(large  + "!", cloned);
 
 ## Comparison
 
-| Name                                                                                        | Size     | Inline   | `&'static str` | Notes                                          |
-| ------------------------------------------------------------------------------------------- | -------- | -------- | -------------- | ---------------------------------------------- |
-| `String`                                                                                    | 24 bytes | No       | No             | prelude                                        |
-| `Cow<'static, str>`                                                                         | 24 bytes | No       | Yes            | std (alloc)                                    |
-| [`CompactString`](https://docs.rs/compact_str/latest/compact_str/struct.CompactString.html) | 24 bytes | 24 bytes | Yes            | Nich optimized for `Option<_>`                 |
-| [`EcoString`](https://docs.rs/ecow/latest/ecow/string/struct.EcoString.html)                | 16 bytes | 15 bytes | No             | Clone-on-Write, Nich optimized for `Option<_>` |
-| `LeanString` (This crate)                                                                   | 16 bytes | 16 bytes | Yes            | Clone-on-Write, Nich optimized for `Option<_>` |
+| Name                                                                                        | Size     | Inline   | `&'static str` | Notes                                           |
+| ------------------------------------------------------------------------------------------- | -------- | -------- | -------------- | ----------------------------------------------- |
+| `String`                                                                                    | 24 bytes | No       | No             | prelude                                         |
+| `Cow<'static, str>`                                                                         | 24 bytes | No       | Yes            | std (alloc)                                     |
+| [`CompactString`](https://docs.rs/compact_str/latest/compact_str/struct.CompactString.html) | 24 bytes | 24 bytes | Yes            | Niche optimized for `Option<_>`                 |
+| [`EcoString`](https://docs.rs/ecow/latest/ecow/string/struct.EcoString.html)                | 16 bytes | 15 bytes | No             | Clone-on-Write, Niche optimized for `Option<_>` |
+| `LeanString` (This crate)                                                                   | 16 bytes | 16 bytes | Yes            | Clone-on-Write, Niche optimized for `Option<_>` |
 
 <details>
 <summary>Above table is for 64-bit architecture. Click here for 32-bit architecture.</summary>
 
-| Name                      | Size     | Inline   | `&'static str` | Notes                                          |
-| ------------------------- | -------- | -------- | -------------- | ---------------------------------------------- |
-| `String`                  | 12 bytes | No       | No             | prelude                                        |
-| `Cow<'static, str>`       | 12 bytes | No       | Yes            | std (alloc)                                    |
-| `CompactString`           | 12 bytes | 12 bytes | Yes            | Nich optimized for `Option<_>`                 |
-| `EcoString`               | 8 bytes  | 7 bytes  | No             | Clone-on-Write, Nich optimized for `Option<_>` |
-| `LeanString` (This crate) | 8 bytes  | 8 bytes  | Yes            | Clone-on-Write, Nich optimized for `Option<_>` |
+| Name                      | Size     | Inline   | `&'static str` | Notes                                           |
+| ------------------------- | -------- | -------- | -------------- | ----------------------------------------------- |
+| `String`                  | 12 bytes | No       | No             | prelude                                         |
+| `Cow<'static, str>`       | 12 bytes | No       | Yes            | std (alloc)                                     |
+| `CompactString`           | 12 bytes | 12 bytes | Yes            | Niche optimized for `Option<_>`                 |
+| `EcoString`               | 8 bytes  | 7 bytes  | No             | Clone-on-Write, Niche optimized for `Option<_>` |
+| `LeanString` (This crate) | 8 bytes  | 8 bytes  | Yes            | Clone-on-Write, Niche optimized for `Option<_>` |
 
 </details>
 
