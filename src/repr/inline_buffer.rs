@@ -16,6 +16,62 @@ const _: () = {
 impl InlineBuffer {
     /// # Safety
     /// `text` must have a length less than or equal to `MAX_INLINE_SIZE`.
+    #[inline]
+    #[cfg(all(target_pointer_width = "64", target_endian = "little"))]
+    pub(super) const unsafe fn new(text: &str) -> Self {
+        debug_assert!(text.len() <= MAX_INLINE_SIZE);
+        const _: () = assert!(MAX_INLINE_SIZE == 2 * size_of::<u64>());
+
+        use core::ptr::read_unaligned as load;
+
+        // Assemble `InlineBuffer` entirely in registers.
+        // Ref: https://github.com/ParkMyCar/compact_str/blob/v0.10.0/compact_str/src/repr/inline.rs#L22-L128
+
+        let len = text.len();
+        let src = text.as_ptr();
+
+        let last_byte = ((len as u64) | LastByte::MASK_1100_0000 as u64) << 56;
+
+        let (w0, w1);
+        unsafe {
+            if len == MAX_INLINE_SIZE {
+                w0 = load(src as *const u64);
+                w1 = load(src.add(8) as *const u64);
+            } else if len >= 8 {
+                // SAFETY: `src` is valid for `len >= 8` bytes.
+                w0 = load(src as *const u64);
+                w1 = if len == 8 {
+                    last_byte
+                } else {
+                    let tail = load(src.add(len - 8) as *const u64);
+                    (tail >> ((MAX_INLINE_SIZE - len) * 8)) | last_byte
+                };
+            } else if len >= 4 {
+                // SAFETY: `src` is valid for `len >= 4` bytes.
+                let head = load(src as *const u32) as u64;
+                let tail = load(src.add(len - 4) as *const u32) as u64;
+                w0 = head | (tail << ((len - 4) * 8));
+                w1 = last_byte;
+            } else if len >= 2 {
+                // SAFETY: `src` is valid for `len >= 2` bytes.
+                let head = load(src as *const u16) as u64;
+                let tail = load(src.add(len - 2) as *const u16) as u64;
+                w0 = head | (tail << ((len - 2) * 8));
+                w1 = last_byte;
+            } else if len == 1 {
+                w0 = *src as u64; // load(src as *const u8) as u64
+                w1 = last_byte;
+            } else {
+                w0 = 0;
+                w1 = last_byte;
+            }
+            mem::transmute([w0, w1])
+        }
+    }
+
+    /// # Safety
+    /// `text` must have a length less than or equal to `MAX_INLINE_SIZE`.
+    #[cfg(not(all(target_pointer_width = "64", target_endian = "little")))]
     pub(super) const unsafe fn new(text: &str) -> Self {
         debug_assert!(text.len() <= MAX_INLINE_SIZE);
 
