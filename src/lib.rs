@@ -2013,6 +2013,24 @@ impl FromIterator<LeanString> for LeanString {
     }
 }
 
+impl FromIterator<LeanStr> for LeanString {
+    fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
+        let mut iter = iter.into_iter();
+        let Some(first) = iter.next() else {
+            return LeanString::new();
+        };
+        let mut buf = first.into_lean_string();
+        buf.extend(iter);
+        buf
+    }
+}
+
+impl FromIterator<LeanString> for LeanStr {
+    fn from_iter<T: IntoIterator<Item = LeanString>>(iter: T) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
+    }
+}
+
 impl FromIterator<LeanStr> for LeanStr {
     fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
@@ -2022,6 +2040,22 @@ impl FromIterator<LeanStr> for LeanStr {
         };
         buf.extend(iter);
         buf.into_lean_str()
+    }
+}
+
+impl FromIterator<LeanString> for String {
+    fn from_iter<T: IntoIterator<Item = LeanString>>(iter: T) -> Self {
+        let mut buf = String::new();
+        buf.extend(iter);
+        buf
+    }
+}
+
+impl FromIterator<LeanStr> for String {
+    fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
+        let mut buf = String::new();
+        buf.extend(iter);
+        buf
     }
 }
 
