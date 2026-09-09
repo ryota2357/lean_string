@@ -149,14 +149,14 @@ lib.rs:1008 は容量をぴったり確保したあと `try_push_str` を n 回�
 
 ## 進め方
 
-1. **A-1 (`LeanStr::repeat`)** — 黙って `String` を返す状態がいちばん危険。
-2. **A-2 / A-3 (`Extend<&_>` と参照からの `From`)** — 既存の impl に委譲するだけ。
-3. **C (`From<LeanString> for Box<str>` ほか)** — 機械的。
-4. **B の `reserve_exact` / `try_reserve_exact`** — 機構が揃っている。
+1. A-1 (`LeanStr::repeat`) — 黙って `String` を返す状態がいちばん危険。
+2. A-2 / A-3 (`Extend<&_>` と参照からの `From`) — 既存の impl に委譲するだけ。
+3. C (`From<LeanString> for Box<str>` ほか) — 機械的。
+4. B の `reserve_exact` / `try_reserve_exact` — 機構が揃っている。
    `Repr::reserve` に「amortize するか否か」の引数を足すか、
    `reserve_exact` 用の経路を分けるかの設計判断が要る。
-5. **D (`try_` 版 / `# Panics`)** — 案C を採るなら `from_utf16*` から。
-6. **G-2 (`from_utf8_lossy` の fast path)** — 小さく効果が読める。
+5. D (`try_` 版 / `# Panics`) — 案C を採るなら `from_utf16*` から。
+6. G-2 (`from_utf8_lossy` の fast path) — 小さく効果が読める。
 7. 残り (`as_mut_str` / `drain` / `replace_range` / F) は需要が出たときに。
    `drain` と `replace_range` は `tests/alloc_string.rs` に移植済みのテストが
    コメントアウトされたまま置いてある。

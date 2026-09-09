@@ -180,7 +180,7 @@ if self.last_byte() < HeapMarker && other.last_byte() < HeapMarker {
 `Repr::new_with` の inline arm も同じ。
 
 正規形を崩すのは `InlineBuffer::set_len` (inline_buffer.rs:133-139) だけで、
-これは**バイト 15 しか書き換えないので、縮めたときに古いバイトが残る**。
+これはバイト 15 しか書き換えないので、縮めたときに古いバイトが残る。
 縮める経路は `truncate_unchecked` / `pop` / `remove` / `retain` / `clear` で、
 いずれも `impl Repr<Mutable>` にある。
 

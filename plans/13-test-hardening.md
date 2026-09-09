@@ -13,7 +13,7 @@ static FAIL_NEXT_REALLOCATION: Cell<bool> = const { Cell::new(false) };
 
 しかし `FAIL_NEXT_REALLOCATION` を `true` にするのは `without_allocating` ヘルパ
 (tests/out_of_memory.rs:56-66) だけで、そこは「再確保が起きなかったこと」を確認する用途。
-つまり**再確保が失敗する経路を通るテストが 1 つも無い**。
+つまり再確保が失敗する経路を通るテストが 1 つも無い。
 
 未検証のまま残っているもの:
 
@@ -55,8 +55,8 @@ unsafe なのに、そこがいちばん検査しにくい。
   グローバルなカウンタになるので `--test-threads=1` が要る (並行するテストの
   確保が混ざることを確認した)。
 - [plans/12](./12-mutability-conversion.md) の A で `&mut self` を取る形に変えれば、
-  `try_reserve` と同じように内容も検査できるようになる。**これは 12-A を採る理由の
-  1 つとして数えてよい**。
+  `try_reserve` と同じように内容も検査できるようになる。これは 12-A を採る理由の
+  1 つとして数えてよい。
 
 `into_exact` の失敗復元は 32-bit で長さ prefix の有無が変わるので、
 Miri の i686 / powerpc ターゲットでも通ることを確認したい。
@@ -91,7 +91,7 @@ match args.as_str() {
 - 空の inline 文字列に `write!(s, "literal")` → static バッファになること
 - 空の static 文字列に対して同じことをした場合
 - 空でない文字列に対して (fast path に入らず追記されること)
-- **確保済みの空の heap 文字列に対して** — `!self.is_heap_allocated()` のガードが
+- 確保済みの空の heap 文字列に対して — `!self.is_heap_allocated()` のガードが
   効いて容量が保たれること。このガードを外すと確保済み容量が捨てられるので、
   退行テストとして価値がある
 
@@ -122,7 +122,7 @@ fallible な API の中にある以上これは契約違反になる。到達不
 - `Hash` / `Borrow<str>` のテストが無い。`HashMap<LeanStr, _>` に `&str` で引ける
   (`Borrow<str>` + `Hash` + `Eq` の整合) ことは実装上は正しいが、固定するテストが無い。
   リポジトリ全体で `HashMap` / `HashSet` / `BTreeMap` / `BTreeSet` を使ったテストは 1 つも無い。
-- **`Ord` / `PartialOrd` は `LeanString` と `LeanStr` のどちらもまったくテストされていない**。
+- `Ord` / `PartialOrd` は `LeanString` と `LeanStr` のどちらもまったくテストされていない。
   `.cmp(` や `.sort()` を使うテストがリポジトリに存在しない。
   [plans/07](./07-equality-policy.md) の案1 を採ると `Ord` の実装を差し替えることになり、
   「ポインタ一致だが長さが違う ⇒ 長さが順序を決める」という間違えやすい規則が入るので、
@@ -270,12 +270,12 @@ doc の修正と合わせてテストを足す。
 
 A → B → D → H の順が効率的。
 
-1. **A** は退行時の被害がもっとも大きい経路をカバーする。
+1. A は退行時の被害がもっとも大きい経路をカバーする。
    [plans/12](./12-mutability-conversion.md) の A の前提でもある。
-2. **B** は小さく、`write_fmt` のガードという退行しやすい箇所を守る。
+2. B は小さく、`write_fmt` のガードという退行しやすい箇所を守る。
    `try_from_fmt` の到達不能な分岐をどうするかの判断もここで済ませる。
-3. **D** は [plans/04](./04-append-writer.md) の前提。
-4. **H** はコードを変えないので、他のタスクと並行して進められる。
+3. D は [plans/04](./04-append-writer.md) の前提。
+4. H はコードを変えないので、他のタスクと並行して進められる。
 
 C / E / F / G は気づいたときに足していく。E と F はそれぞれ
 [plans/09](./09-doc-fixes.md) と [plans/06](./06-retain-shared-fast-path.md) の中で

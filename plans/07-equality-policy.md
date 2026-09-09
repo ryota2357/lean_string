@@ -23,7 +23,7 @@ codegen としては無駄がない ([research/codegen-baseline.md](../research/
 (詳細は [research/equality.md](../research/equality.md) の §3)。
 確かなのは「clone 同士でも速くならない」ことだけで、これは近道が入っていない以上当然。
 
-速くする手は 3 つあり、効く場面が違う。**排他ではない**ので、どれを採るかを個別に決める。
+速くする手は 3 つあり、効く場面が違う。排他ではないので、どれを採るかを個別に決める。
 
 ## 案1: 共有バッファのポインタ近道
 
@@ -40,7 +40,7 @@ pub(crate) fn content_eq(&self, other: &Self) -> bool {
 }
 ```
 
-- 長さの比較を先に置くのは**正しさのため**であって最適化ではない。64-bit の
+- 長さの比較を先に置くのは正しさのためであって最適化ではない。64-bit の
   `truncate_unchecked` は共有 heap バッファに対してハンドル側の `TextLen` だけを縮める
   (repr.rs:783-790) し、`StaticBuffer::set_len` も同様。つまり「同じポインタ・異なる長さ」の
   ハンドルが作れる。
@@ -71,7 +71,7 @@ inline バッファの「使っていないバイトは必ずゼロ」を不変�
 `Repr::new_with` の inline arm も同じ。
 
 正規形を崩すのは `InlineBuffer::set_len` (inline_buffer.rs:133-139) だけで、
-これは**バイト 15 しか書き換えないので、縮めたときに古いバイトが残る**。
+これはバイト 15 しか書き換えないので、縮めたときに古いバイトが残る。
 縮める呼び出し元は `truncate_unchecked` / `pop` / `remove` / `retain` / `clear` で、
 いずれも `impl Repr<Mutable>` にある。
 
@@ -108,12 +108,12 @@ provenance の扱いに注意が要る。inline バッファの第 1 ワード�
 
 推奨: **案3 → 案2 (`LeanStr` 限定) → 案1** の順に測る。
 
-1. **案3 が最初**。追加の不変条件が無く、効く範囲がいちばん広い。
+1. 案3 が最初。追加の不変条件が無く、効く範囲がいちばん広い。
    `bcmp` の呼び出しが消えることは asm で確定できるので、判断が早い。
-2. **案2 は `LeanStr` に限れば安い**。`into_immutable` の 1 か所を正規化するだけで、
+2. 案2 は `LeanStr` に限れば安い。`into_immutable` の 1 か所を正規化するだけで、
    `LeanStr` の比較が最速になる。文字列 interning や AST のシンボル比較のような、
    `LeanStr` がいちばん使われる場面に効く。`LeanString` への拡張は別に測る。
-3. **案1 は最後**。効くのは共有された長い文字列だけで、inline 同士には
+3. 案1 は最後。効くのは共有された長い文字列だけで、inline 同士には
    純粋なコストになる。案3 を入れた後だと inline 側が速くなっているぶん、
    相対的な劣化が見えやすくなる。
 
@@ -152,18 +152,18 @@ impl LeanString {
 
 ## 検証方針
 
-- **asm**: 案3 で `bcmp` の呼び出しが消えること。案2 で `LeanStr` 同士の比較が
+- asm: 案3 で `bcmp` の呼び出しが消えること。案2 で `LeanStr` 同士の比較が
   ロード 2 本 + 比較になること。案1 で「最速の不一致ケース」に何命令乗るか。
-- **criterion**: `apis.rs` の `eq` / `eq/cloned` と `comparison.rs` の `Eq` / `Eq/cloned`。
+- criterion: `apis.rs` の `eq` / `eq/cloned` と `comparison.rs` の `Eq` / `Eq/cloned`。
   現状 `eq` の長さリストは 0/1/15/16/17/256。案1 と案2 の判断には
   「先頭バイトで不一致になる最速ケース」と「末尾 1 バイトだけ違うケース」の
   2 つを足す必要がある。不一致位置を変えた点も足す。
-- **正しさ (案1)**: `truncate` で「同じポインタ・異なる長さ」を作ったハンドル同士の
+- 正しさ (案1): `truncate` で「同じポインタ・異なる長さ」を作ったハンドル同士の
   `==` と `cmp` が正しいこと。static バッファ同士も同様。
-- **正しさ (案2)**: すべての構築経路と、`into_immutable` を通った後の `Repr<Immutable>` が
+- 正しさ (案2): すべての構築経路と、`into_immutable` を通った後の `Repr<Immutable>` が
   `[len, 15)` をゼロにしていることを proptest で確認する。
   `LeanString` にも広げる場合は `truncate` / `pop` / `remove` / `retain` の後も同様。
-- **Miri**: 案2 は `*const ()` フィールドを `usize` として読むので
+- Miri: 案2 は `*const ()` フィールドを `usize` として読むので
   `-Zmiri-strict-provenance` で必ず確認する。
 
 ## 依存

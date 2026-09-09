@@ -43,7 +43,7 @@ pub(super) unsafe fn release(&mut self) {
 
 `on_last_reference` が `&mut HeapBuffer<H>` を取るため、`*self` のアドレスが
 インライン化されない関数へ渡る。アドレスが escape する以上、値をレジスタに置いたままには
-できず、by-value で受け取った `LeanString` は**呼び出しが起きない inline 経路でも**
+できず、by-value で受け取った `LeanString` は呼び出しが起きない inline 経路でも
 スタックに実体化される。
 
 ## 方針
@@ -164,7 +164,7 @@ probe_drop_one:
 ## 併せて検討する: unique な drop で atomic RMW を避ける
 
 同じ `release` に、もう 1 つ独立した案がある。参照カウントを減らす前に
-`Acquire` の**ロード**で 1 かどうかを見る形。
+`Acquire` のロードで 1 かどうかを見る形。
 
 ```rust
 #[inline]
@@ -201,16 +201,16 @@ Shared 状態で持ち込み、続く RMW が Shared→Exclusive のコヒーレ
 
 ## 検証方針
 
-- **asm** (主検証):
+- asm (主検証):
   - `fn drop_one(s: LeanString)`: 16 バイトのスタックコピー (`movups`/`movaps` の対) が
     消え、inline 変種の drop が「判別子の比較 + 早期 return」だけになること。
   - `fn drop_vec(v: Vec<LeanString>)`: ループ本体が現状より短くなること。
   - x86-64 と aarch64 の両方。
-- **loom**: 全シナリオ。atomic の順序 (`Release` の decrement + 最終参照時の
+- loom: 全シナリオ。atomic の順序 (`Release` の decrement + 最終参照時の
   `Acquire` fence) は変えていないので、ここで落ちたら実装ミス。
-- **Miri**: 全ターゲット。特に `tests/race_condition.rs` を
+- Miri: 全ターゲット。特に `tests/race_condition.rs` を
   `-Zmiri-preemption-rate=1` 付きで。
-- **criterion**: drop 単体のベンチは無い。`apis.rs` の `from` / `clone` は
+- criterion: drop 単体のベンチは無い。`apis.rs` の `from` / `clone` は
   イテレーションごとに構築と破棄を行うので、drop のコストはそこに現れる。
   必要なら `Vec<LeanString>` の drop ベンチを足す。
 

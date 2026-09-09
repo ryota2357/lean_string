@@ -28,8 +28,8 @@ pub(crate) fn from_char(ch: char) -> Self {
 
 4 バイト文字の arm がとくに悪い。1 バイトずつのストア 4 本に対して
 `movl -4(%rsp), %esi` の 4 バイトロードが跨がるので、x86 の store-to-load forwarding が
-成立しない。x86 のストアバッファは**ロードが単一のストアに完全に含まれている場合にしか
-転送できない**ので、失敗するとストアがキャッシュに書かれるまで待つ (12 サイクル程度)。
+成立しない。x86 のストアバッファはロードが単一のストアに完全に含まれている場合にしか
+転送できないので、失敗するとストアがキャッシュに書かれるまで待つ (12 サイクル程度)。
 Apple の aarch64 は複数ストアに跨るロードでも転送できるため、ARM だけで測ると見えない。
 
 ## 方針
@@ -79,13 +79,13 @@ pub(crate) fn from_char(ch: char) -> Self {
 
 ## 検証方針
 
-- **正しさ**: `char::MAX` を含む全長 (1/2/3/4 バイト) の境界と、
+- 正しさ: `char::MAX` を含む全長 (1/2/3/4 バイト) の境界と、
   サロゲート直前後 (`\u{D7FF}`, `\u{E000}`)、`\u{FFFF}` / `\u{10000}` の境界で
   `ch.encode_utf8()` の結果と一致すること。`proptest` で全 `char` を回すのが手軽。
-- **asm**: `LeanString::from(char)` の 2〜4 バイト arm から `-N(%rsp)` への
+- asm: `LeanString::from(char)` の 2〜4 バイト arm から `-N(%rsp)` への
   ストア/ロードが消え、各 arm が 2 ストアで終わること。x86-64 と aarch64 の両方。
-- **Miri**: 4 ターゲット (64/32-bit × LE/BE)。BE と 32-bit はフォールバック経路の確認を兼ねる。
-- **criterion**: `bench/benches/apis.rs` の `from` には `char` の点が無いので足す。
+- Miri: 4 ターゲット (64/32-bit × LE/BE)。BE と 32-bit はフォールバック経路の確認を兼ねる。
+- criterion: `bench/benches/apis.rs` の `from` には `char` の点が無いので足す。
   ASCII / 2 バイト / 3 バイト / 4 バイトの 4 点。
   `LeanString::push(char)` は `push_str` 経由なのでこのタスクの影響を受けない。
 

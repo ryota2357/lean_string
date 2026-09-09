@@ -80,13 +80,13 @@ CoW である分、clone がバッファを共有するので「確保してコ�
 
 ## 検証方針
 
-- **asm**: `LeanString::from(&str)` の heap 経路と `push_str` から `callq *memcpy` が
+- asm: `LeanString::from(&str)` の heap 経路と `push_str` から `callq *memcpy` が
   消え、固定長のロード/ストアに置き換わること。64 バイト超では `memcpy` が残ること。
-- **criterion**: `apis.rs` の `from` (17/256) と `push_str`、`push_str/after_clone`。
+- criterion: `apis.rs` の `from` (17/256) と `push_str`、`push_str/after_clone`。
   `comparison.rs` の `Construct` / `Grow` / `CoW write`。
   17〜64 バイト帯を測れるよう、`apis.rs` の `from` の長さリストに 32 と 64 を足す
   (現状は 0/1/15/16/17/256 でこの帯に点が 1 つしかない)。
-- **Miri**: 重ね合わせコピーの境界を踏むので全 4 ターゲット。
+- Miri: 重ね合わせコピーの境界を踏むので全 4 ターゲット。
 
 効果が誤差の範囲なら見送ってよい。その場合も「試して効かなかった」という記録を残す。
 

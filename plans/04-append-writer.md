@@ -105,15 +105,15 @@ impl Drop for Appender<'_> {
 
 ## 設計判断に必要な情報
 
-- **grow 戦略**: commit してから `Repr::push_str` / `reserve` に任せる
+- grow 戦略: commit してから `Repr::push_str` / `reserve` に任せる
   (amortized 1.5 倍、heap_buffer.rs:19-23) で十分か。独自の倍々戦略は不要のはず。
-- **`appender(0)` の初期状態**: inline バッファのまま始めるとき、`cap` は 16 の定数、
+- `appender(0)` の初期状態: inline バッファのまま始めるとき、`cap` は 16 の定数、
   `ptr` は `self` 自身のアドレスでよい。static バッファは `appender()` の中で
   `ensure_modifiable` 相当が inline / heap へ変換する。
-- **`Appender` が inline バッファを指すときの再解決**: grow で inline → heap へ移ると
+- `Appender` が inline バッファを指すときの再解決: grow で inline → heap へ移ると
   `ptr` が `self` の中から heap へ変わる。`push_bytes` の grow 経路で必ず取り直す形に
   すれば問題ないが、テストで inline → heap を跨ぐ extend を必ず通す。
-- **エラーの扱い**: `Extend` は `Result` を返せないので、内部は `Result` で書いて
+- エラーの扱い: `Extend` は `Result` を返せないので、内部は `Result` で書いて
   `Extend` 側で `unwrap_with_msg` する (既存の `push` と同じ流儀)。
 
 ## `try_repeat` の先行対応
@@ -125,19 +125,19 @@ writer とは独立に、`LeanString::try_repeat` (lib.rs:1008-1022) は
 
 ## 検証方針
 
-- **テスト**: 既存の `Extend`/`FromIterator` テストに加えて、
+- テスト: 既存の `Extend`/`FromIterator` テストに加えて、
   (1) inline → heap を跨ぐ extend、(2) grow を複数回跨ぐ extend、
   (3) 途中で panic したとき長さが `push_bytes` の境界に落ちること、を追加する。
   `tests/property.rs` には `collect::<LeanString>()` の等価性プロパティが既にある
   (`collect_from_chars`)。`extend` 側は無いので足す。
-- **Miri**: 未初期化の余剰容量へ生ポインタで書くので全ターゲット必須。
-- **asm**: `fn collect_chars(it: impl Iterator<Item = char>) -> LeanString` 相当の
+- Miri: 未初期化の余剰容量へ生ポインタで書くので全ターゲット必須。
+- asm: `fn collect_chars(it: impl Iterator<Item = char>) -> LeanString` 相当の
   ループ本体から、要素ごとの関数呼び出し・参照カウントのロード・判別子分岐が
   消えていること。
-- **criterion**: 現状 bench に extend 系が無いので追加する
+- criterion: 現状 bench に extend 系が無いので追加する
   (char 列の collect、短い `&str` 列の extend、`repeat`、`from_utf16`)。
   ベースラインを取ってから着手する。
-- **確保回数**: `from_utf16` の realloc 回数が減ること。カウントするグローバル
+- 確保回数: `from_utf16` の realloc 回数が減ること。カウントするグローバル
   アロケータで測れる (`tests/out_of_memory.rs` に同種の仕組みがある)。
 
 ## 依存

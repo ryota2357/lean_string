@@ -62,7 +62,7 @@
 `cmov` の対がもう 1 組載る。`insert_str` (repr.rs:736) にも同じ重複がある。
 
 `reserve` は長さを変えないので、`push_str` 側の `let len = self.len();` を
-`reserve` の**後**に移すだけでも意味が変わらない。そうすると判別子のロードが
+`reserve` の後に移すだけでも意味が変わらない。そうすると判別子のロードが
 呼び出しを跨いで生存しなくなり、callee-saved レジスタが 1 本空く。
 compact_str は同種の変更で `push_str` が x86 で 54 → 45 命令、arm で 51 → 38 命令に
 なったと記録している。1 行なので [plans/03](./03-push-str-fast-path.md) の中で試す。
@@ -163,38 +163,38 @@ compact_str / char_str / ecow の 3 つともこれを持っており、lean_str
 
 同じところを二度調べないための記録。
 
-- **`Clone` の分岐配置**。`probe_clone` は 12 命令で、heap の arm は判別子の比較と
+- `Clone` の分岐配置。`probe_clone` は 12 命令で、heap の arm は判別子の比較と
   `lock incq` の 2 命令。どちらの arm も 16 バイトのビット単位コピーへ合流し、
   オーバーフロー処理は `.text.unlikely` にある。
   compact_str には「中身が空の `#[cold]` 関数を呼んで分岐配置を誘導する」手法があり、
   inline clone が 1.08 ns → 0.64 ns になったという記録もあるが、
   lean_string の heap arm は「稀な arm」ではないのでそのままは当てはまらない。
-- **`Vec<LeanString>` の drop glue**。ループ本体は判別子比較 + `lock decq` + cold 呼び出しで、
+- `Vec<LeanString>` の drop glue。ループ本体は判別子比較 + `lock decq` + cold 呼び出しで、
   空 repr の書き戻しは無い。
-- **atomic の順序**。`Relaxed` の `fetch_add` (repr.rs:249)、`Release` の `fetch_sub` と
+- atomic の順序。`Relaxed` の `fetch_add` (repr.rs:249)、`Release` の `fetch_sub` と
   最終参照時の `Acquire` fence (heap_buffer.rs:213-225)、`Acquire` の load (heap_buffer.rs:190)
   は `Arc` と同一。`Weak` に相当するものが無いので、
   参照を保持したままカウント 1 を観測できれば排他は保証される。loom がカバーしている。
-- **共有 heap バッファのデータは書き換えられない**。共有状態での `truncate` / `pop` は
+- 共有 heap バッファのデータは書き換えられない。共有状態での `truncate` / `pop` は
   ローカルの `TextLen` ワードしか触らず (repr.rs:781-792)、32-bit で長さが
   ヒープ上にある場合は正しくコピー経路へ落ちる。
   これが `Send`/`Sync` の根拠になっている。実測でも共有が維持されることを確認した。
-- **オーバーフロー経路**。`reserve` の `checked_add` (repr.rs:452)、
+- オーバーフロー経路。`reserve` の `checked_add` (repr.rs:452)、
   `insert_str` の `checked_add` (repr.rs:736)、`repeat` の `checked_mul` (lib.rs:1014)、
   `layout_for` の `checked_add` (heap_buffer.rs:284)、`amortized_growth` の
   saturating (heap_buffer.rs:19-23) がすべて塞いでいる。
-- **32-bit の容量上限 `2^31 - 16`** は正しい。`Capacity::MAX = isize::MAX`、
+- 32-bit の容量上限 `2^31 - 16` は正しい。`Capacity::MAX = isize::MAX`、
   `header_offset = 8`、長さ prefix 4 バイト、`Layout::from_size_align` の
   `size <= isize::MAX - (align - 1)` から `2^31 - 1 - 3 - 12 = 2^31 - 16`。
-- **`from_static_str` の長さ上限** `2^56 - 1` / `2^24 - 1` は
+- `from_static_str` の長さ上限 `2^56 - 1` / `2^24 - 1` は
   `StaticBuffer::MAX_LENGTH` (static_buffer.rs:17-22) と一致している。
-- **`Borrow<str>` / `Hash` / `Eq` の整合**。`HashMap` のキーにして `&str` で
+- `Borrow<str>` / `Hash` / `Eq` の整合。`HashMap` のキーにして `&str` で
   引ける条件を満たしている。
-- **`retain` の panic 安全性**。`SetLenOnDrop` (repr.rs:671-719) が担っており、
+- `retain` の panic 安全性。`SetLenOnDrop` (repr.rs:671-719) が担っており、
   テストもある。
-- **`fmt::Write::write_fmt` の static 化 fast path の健全性**。
+- `fmt::Write::write_fmt` の static 化 fast path の健全性。
   `fmt::Arguments::as_str()` は `Option<&'static str>` を返すので、
   `from_static_str` に渡して `'static` として扱ってよい。
-- **`Repr::len()` の branchless 復元**。`tail_word()` と `assert_unchecked` の組み合わせで
+- `Repr::len()` の branchless 復元。`tail_word()` と `assert_unchecked` の組み合わせで
   `cmov` の対に畳まれており、compact_str が `asm!` によるロードの固定
   (`ensure_read`) で得ているのと同じ形になっている。追加の手当ては要らない。

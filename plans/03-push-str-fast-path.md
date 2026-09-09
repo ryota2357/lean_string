@@ -9,13 +9,13 @@ outline 済みなので関数呼び出しが毎回起きるわけではないが
 [research/codegen-baseline.md](../research/codegen-baseline.md) の §3 で測ったとおり
 次の 4 つが残っている。
 
-1. **判別子の読み直しが 3 回**。fast path の判定で `last_byte` を読み、`as_mut_ptr` で
+1. 判別子の読み直しが 3 回。fast path の判定で `last_byte` を読み、`as_mut_ptr` で
    もう一度読み、`set_len` でさらにもう一度読んで 3 分岐する。`push_str` は最初の判定で
    バッファ種別を知っているのに、それを後段へ渡す手段がない。
-2. **`set_len` に死んだ分岐が残る**。`cmpl $209, %eax` は StaticMarker との比較だが、
+2. `set_len` に死んだ分岐が残る。`cmpl $209, %eax` は StaticMarker との比較だが、
    `reserve` が `Ok` を返した後の `self` は static ではありえない。
-3. **追記のコピーが可変長 memcpy の呼び出し** ([plans/02](./02-medium-copy.md) の題材)。
-4. **関数全体が大きく、呼び出し側でインライン化されない**。`Repr::push_str` は
+3. 追記のコピーが可変長 memcpy の呼び出し ([plans/02](./02-medium-copy.md) の題材)。
+4. 関数全体が大きく、呼び出し側でインライン化されない。`Repr::push_str` は
    106 命令あり、`#[inline]` が付いていても下流クレートからの呼び出しでは
    `callq Repr::push_str` になる。
 
@@ -134,15 +134,15 @@ slow path が `&mut self` を取ること自体は追加のコストにならな
 
 ## 検証方針
 
-- **asm**: `LeanString::push_str` が呼び出し側に展開され、fast path が
+- asm: `LeanString::push_str` が呼び出し側に展開され、fast path が
   「判別子 1 回 + 参照カウントのロード 1 回 + 容量比較 + コピー + 長さ更新」に
   収まること。`push_str_slow` が `.text.unlikely` へ配置されていること。
-- **criterion**: `apis.rs` の `push_str` (現状 292.84 ns、std は 186.12 ns) と
+- criterion: `apis.rs` の `push_str` (現状 292.84 ns、std は 186.12 ns) と
   `push_str/after_clone` (現状 44.157 ns、std は 56.578 ns)、
   `comparison.rs` の `Grow`。
-- **loom**: `concurrent_push` シナリオ。unique 判定の順序は変えない想定だが、
+- loom: `concurrent_push` シナリオ。unique 判定の順序は変えない想定だが、
   fast path が新しい判定順序を持つので必ず回す。
-- **Miri**: 全ターゲット。
+- Miri: 全ターゲット。
 
 改善が誤差レベルなら採用を見送り、その結果を記録として残す。
 

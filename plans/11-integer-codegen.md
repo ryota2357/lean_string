@@ -44,7 +44,7 @@ u32 / i64 では `String` より速い。
 
 ## 試して効かなかった対処
 
-**素直な 2 案はどちらも効かなかった**ので、記録しておく。
+素直な 2 案はどちらも効かなかったので、記録しておく。
 
 ### 案X: `new_with` の中で読み直しをワード単位に強制する
 
@@ -78,7 +78,7 @@ after:  probe_from_num = 22 命令 + callq into_repr  (sret 経由で受け取�
 ### 案A: 桁数の上限を型ごとに `assert_unchecked` で伝える
 
 `MAX_INLINE_SIZE = 16` なので、u8〜u32 / i8〜i32 (符号込みで最大 11 文字) は
-**必ず inline に収まる**。型ごとの桁数上限を const にして
+必ず inline に収まる。型ごとの桁数上限を const にして
 `new_with` の中で `hint::assert_unchecked(len <= MAX_INLINE_SIZE)` を置けば、
 `new_with` の heap 分岐が型レベルで死ぬ。
 
@@ -107,15 +107,15 @@ after:  probe_from_num = 22 命令 + callq into_repr  (sret 経由で受け取�
 
 ## 検証方針
 
-- **asm**: `probe_from_num` の末尾が `movq` 2 本になること (案B)、
+- asm: `probe_from_num` の末尾が `movq` 2 本になること (案B)、
   または確保の分岐が消えること (案A)。`into_repr` が下流から見て
   インライン展開されたままであることを毎回確認する — ここが今回いちばん壊れやすい。
-- **criterion**: `comparison.rs` の `Numbers` グループ。u32 / i64 / u64::MAX / f64。
+- criterion: `comparison.rs` の `Numbers` グループ。u32 / i64 / u64::MAX / f64。
   `u64::MAX` は変わらないはずなので、劣化していないことの確認になる。
-- **テスト**: `tests/property.rs` に整数の `to_lean_string()` と
+- テスト: `tests/property.rs` に整数の `to_lean_string()` と
   `to_string()` の等価性プロパティがあるか確認し、無ければ全整数型ぶん足す。
   境界 (`MIN` / `MAX` / 0 / ±1 / 桁上がり) を明示的に列挙するテストも足す。
-- **Miri**: 4 ターゲット。
+- Miri: 4 ターゲット。
 
 ## 補足
 

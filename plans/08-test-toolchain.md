@@ -23,7 +23,7 @@ error: could not compile `lean_string` (test "property") due to 4 previous error
 `String::from_utf16le` / `from_utf16le_lossy` / `from_utf16be` / `from_utf16be_lossy` を
 オラクルとして使っている。これらは `str_from_utf16_endian`
 ([rust-lang/rust#116258](https://github.com/rust-lang/rust/issues/116258)) の一部で、
-安定化されたのは **1.98.0**。
+安定化されたのは 1.98.0。
 
 | rustc | `String::from_utf16le` |
 | --- | --- |

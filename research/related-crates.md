@@ -16,7 +16,7 @@ lean_string との関係:
   コードの継承関係は無い。参考にするのは考え方であって差分ではない。
 - `char_str` は lean_string を fork したクレート。ただし `Mutability` の型パラメータが
   入る前の時点で分岐しており、`Repr<Mutable>` / `Repr<Immutable>` の型レベルの分離を
-  **実行時のタグ** (`ExactHeapMarker` / `HeapMarker`) に置き換えている。
+  実行時のタグ (`ExactHeapMarker` / `HeapMarker`) に置き換えている。
   この点については lean_string のほうが良い形になっているので、そこは取らない。
 - `compact_str` は表現が 24 バイトなので、「表現の大きさに依存しない理屈」だけを取る。
 
@@ -59,9 +59,9 @@ lean_string との関係:
 薄いラッパ」に分けている。24 バイトの `Repr` が SysV の MEMORY クラスになって
 sret 返しになり、LLVM がそれを戻り値スロットへ散らしてコピーしていたための対処。
 
-lean_string には**該当しない**。`Repr` は 16 バイトで、`Result<Repr<M>, ReserveError>` も
+lean_string には該当しない。`Repr` は 16 バイトで、`Result<Repr<M>, ReserveError>` も
 `LastByte` の niche によって 16 バイトに収まる (実測)。したがって `rax:rdx` で返る。
-ただし**タプル型のエラーを持つ `Result` は 24 バイトになる**ので、そちらは該当する
+ただしタプル型のエラーを持つ `Result` は 24 バイトになるので、そちらは該当する
 ([plans/12](../plans/12-mutability-conversion.md))。
 
 ### compact_str の `InlineBuffer::new` の `[u64; 3]` レジスタ組み立て
@@ -77,7 +77,7 @@ lean_string には 2 ワード版が既にある (`src/repr/inline_buffer.rs:21-
 
 ### compact_str の `into_string()` / `from_string_buffer()`
 
-`String` との O(1) 相互変換。lean_string のヒープレイアウトはデータの**前**にヘッダを
+`String` との O(1) 相互変換。lean_string のヒープレイアウトはデータの前にヘッダを
 置くので、`String::from_raw_parts` に渡せる形にはならない。構造的に不可能。
 
 ### char_str の `Header { capacity, count }` のフィールド順
@@ -114,8 +114,8 @@ lean_string は 1.5 倍 (`amortized_growth`, heap_buffer.rs:19-23)。
 ### store-to-load forwarding
 
 小さな値をバイト単位や部分ワードのストアで組み立て、直後に読み手がワード単位で
-読むと、Intel のストアバッファは転送できない。**ロードが単一のストアに完全に
-含まれている場合にしか転送できない**ためで、失敗するとストアがキャッシュに
+読むと、Intel のストアバッファは転送できない。ロードが単一のストアに完全に
+含まれている場合にしか転送できないためで、失敗するとストアがキャッシュに
 書かれるまで待つ (12 サイクル程度)。Apple の aarch64 は複数ストアに跨るロードでも
 転送できるので、ARM だけで測ると見えない。
 
