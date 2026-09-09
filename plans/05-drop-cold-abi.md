@@ -4,8 +4,8 @@
 
 ## 背景
 
-`b94f15a` で Drop の書き戻しは消え、`Vec<LeanString>` の drop glue からも dead store が
-なくなった。しかし単発の drop には 16 バイトのスタックコピーが残っている
+`Vec<LeanString>` の drop glue は良い形になっているが、単発の drop には
+16 バイトのスタックコピーが残っている
 ([research/codegen-baseline.md](../research/codegen-baseline.md) の §5)。
 
 ```asm
@@ -14,18 +14,19 @@ probe_drop_one:
 	movups	(%rdi), %xmm0         # ★引数を丸ごとスタックへ実体化
 	movaps	%xmm0, (%rsp)
 	cmpb	$-48, 15(%rsp)
-	jne	.LBB3_3
+	jne	.LBB7_3
 	movq	(%rsp), %rax
 	lock		decq	-16(%rax)
-	je	.LBB3_2
-.LBB3_3:
+	je	.LBB7_2
+.LBB7_3:
+	addq	$24, %rsp
 	retq
-.LBB3_2:
+.LBB7_2:
 	movq	%rsp, %rdi            # cold 側へ「アドレス」を渡す
 	callq	..HeapBuffer$LT$H$GT$7release17on_last_reference...E
 ```
 
-原因は `HeapBuffer::release` (src/repr/heap_buffer.rs:210-222) の形。
+原因は `HeapBuffer::release` (src/repr/heap_buffer.rs:211-227) の形。
 
 ```rust
 pub(super) unsafe fn release(&mut self) {
@@ -56,7 +57,7 @@ pub(super) unsafe fn release(&mut self) {
         // cold 側へは値だけを渡す。`&mut self` を渡すと `*self` のアドレスが escape し、
         // 呼び出しが起きない経路でも呼び出し側で値をスタックに実体化させられる。
         // SAFETY: 直前の値が 1 だったので他の参照は存在しない。`self` はこの後
-        //         アクセスされない (`#Safety` の契約)。
+        //         アクセスされない (`# Safety` の契約)。
         unsafe { Self::on_last_reference(ptr::read(self)) };
     }
 }
@@ -70,8 +71,8 @@ unsafe fn on_last_reference(mut this: Self) {
 ```
 
 `HeapBuffer<H>` は `{ ptr: NonNull<u8>, len: TextLen }` の 2 ワードなので、
-SysV x86-64 でも AAPCS64 でもレジスタ 2 本で渡る (16 バイトの整数 2 ワードは
-`rdi:rsi` / `x0:x1`)。`ptr::read` で値にしてから渡すことで `&mut self` は escape しない。
+SysV x86-64 でも AAPCS64 でもレジスタ 2 本で渡る。`ptr::read` で値にしてから渡すことで
+`&mut self` は escape しない。
 
 `dealloc` が `&mut self` を取るので `this` を `mut` で受けているが、これはローカル変数の
 アドレスであり呼び出し側には見えない。
@@ -81,7 +82,7 @@ SysV x86-64 でも AAPCS64 でもレジスタ 2 本で渡る (16 バイトの整
 上のコードを実際に当てて測った。
 
 `probe_drop_one` (= `fn drop_one(s: LeanString)`) はスタックフレームごと消え、
-cold への呼び出しは末尾ジャンプになった。
+14 命令から 10 命令になった。cold への呼び出しは末尾ジャンプになる。
 
 ```asm
 ; after
@@ -90,44 +91,38 @@ probe_drop_one:
 	movq	%rsi, %rax
 	shrq	$56, %rax
 	cmpl	$208, %eax
-	jne	.LBB11_2
+	jne	.LBB8_2
 	movq	(%rdi), %rdi
 	lock		decq	-16(%rdi)
-	je	.LBB11_3
-.LBB11_2:
+	je	.LBB8_3
+.LBB8_2:
 	retq
-.LBB11_3:
-	jmpq	*..HeapBuffer$LT$H$GT$7release17on_last_reference...E
+.LBB8_3:
+	jmpq	*..HeapBuffer$LT$H$GT$17on_last_reference...E@GOTPCREL(%rip)
 ```
 
 16 バイトのコピー (`movups`/`movaps` の対) と `subq $24, %rsp` が無くなっている。
 
-`Vec<LeanString>` の drop glue でも、関数ポインタのロードがループの外へ出た。
+`Vec<LeanString>` の drop glue (80 命令 → 66 命令) では、関数ポインタのロードが
+ループの外へ出た。
 
 ```asm
 	leaq	16(%r14), %r15
 	movq	..on_last_reference...@GOTPCREL(%rip), %r12   ; ループ外へ
-	jmp	.LBB12_2
-	.p2align	4
-.LBB12_5:
+	jmp	.LBB9_2
+.LBB9_5:
 	addq	$16, %r15
 	decq	%r13
-	je	.LBB12_6
-.LBB12_2:
+	je	.LBB9_6
+.LBB9_2:
 	cmpb	$-48, -1(%r15)
-	jne	.LBB12_5
+	jne	.LBB9_5
 	movq	-8(%r15), %rsi
 	movq	-16(%r15), %rdi
 	lock		decq	-16(%rdi)
-	jne	.LBB12_5
+	jne	.LBB9_5
 	callq	*%r12
 ```
-
-正しさの確認:
-
-- `cargo test --release --all-features` が全て通る。
-- `RUSTFLAGS="--cfg loom" cargo test --test loom --release --features loom -- --test-threads=1` が通る。
-- `MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --all-features` が x86_64 で通る。
 
 ### 値渡しがレジスタ渡しになる根拠
 
@@ -148,34 +143,68 @@ probe_drop_one:
 
 | 呼び出し元 | 場所 |
 | --- | --- |
-| `Repr::drop_in` | repr.rs:292-300 |
-| `Repr::replace_inner` | repr.rs:271-280 |
-| `reserve` の unshare 経路 | repr.rs:490 |
-| `shrink_to` の共有経路 | repr.rs:559 |
-| `truncate_unchecked` の共有経路 | repr.rs:797 |
-| `into_immutable` / `into_mutable` | repr.rs:913/929/965 |
-| `ensure_modifiable` | repr.rs:831 |
+| `Repr::drop_in` | repr.rs:302-310 |
+| `Repr::replace_inner` | repr.rs:281-291 |
+| `reserve` の unshare 経路 | repr.rs:499 |
+| `shrink_to` の共有経路 | repr.rs:569 |
+| `truncate_unchecked` の共有経路 | repr.rs:807 |
+| `into_immutable` / `into_mutable` | repr.rs:923/939/975 |
+| `ensure_modifiable` | repr.rs:841 |
 
-同じ理屈は `release` 以外の cold ヘルパにも当てはまる。今回あわせて確認する箇所:
+同じ理屈は `release` 以外の cold ヘルパにも当てはまるが、今回の調査では他に対象は無い。
 
-- `Repr::make_shallow_clone` の `ref_count_overflow` (repr.rs:256-261) は
-  `&Repr<M>` を取る。ただしこちらは `panic!` で終わる `-> !` の関数で、
-  現行の asm を見るかぎり `probe_clone` は既に理想的な形
-  (hot 側が fall-through、heap 側は `lock incq` 2 命令) になっているので、
-  変える必要はなさそう。測って確認する。
+- `Repr::make_shallow_clone` の `ref_count_overflow` (repr.rs:267-271) は `&Repr<M>` を
+  取るが、`panic!` で終わる `-> !` の関数で、`probe_clone` は既に理想形
+  (12 命令、heap 側は判別子比較と `lock incq` の 2 命令、cold は `.text.unlikely`)。
+  変える必要はない。
 - `reserve` の `outline!` マクロが作る関数は `&mut Repr<Mutable>` を取る
-  (repr.rs:480, 499, 506, 516)。ここは呼び出し後も `self` を使い続けるので
-  参照渡しが必要であり、値渡しにはできない。ただし `reserve` を呼ぶ関数
-  (`push_str` など) では同じ理由で `self` がスタックに置かれうるので、
-  [plans/03](./03-push-str-fast-path.md) の asm を見るときに合わせて確認する。
+  (repr.rs:479, 490, 509, 516, 526)。ここは呼び出し後も `self` を使い続けるので
+  参照渡しが必要であり、値渡しにはできない。
+
+## 併せて検討する: unique な drop で atomic RMW を避ける
+
+同じ `release` に、もう 1 つ独立した案がある。参照カウントを減らす前に
+`Acquire` の**ロード**で 1 かどうかを見る形。
+
+```rust
+#[inline]
+pub(super) unsafe fn release(&mut self) {
+    if self.reference_count().load(Acquire) == 1 {
+        // 他の所有者はいない。RMW は不要。
+        unsafe { Self::on_last_reference(ptr::read(self)) };
+        return;
+    }
+    if self.reference_count().fetch_sub(1, Release) == 1 {
+        fence(Acquire);
+        unsafe { Self::on_last_reference(ptr::read(self)) };
+    }
+}
+```
+
+健全性の根拠は `Arc::get_mut` の fast path と同じ。カウントを増やすにはすでに
+ハンドルを 1 つ持っている必要があるので、1 を観測できた時点で他の所有者は存在せず、
+以後現れることもない。`Acquire` のロードは最後の所有者の `Release` デクリメントが
+書いた値を読むので、それと synchronizes-with が成立し、解放はその所有者の
+すべてのアクセスの後に起きる。したがって `fence(Acquire)` は RMW 側の arm にだけ残る。
+
+lean_string は同じ `load(Acquire) == 1` の判定を `is_unique()` (heap_buffer.rs:189-191) で
+既に使っているので、メモリモデルの前提はコードベースに受け入れ済み。
+
+**ただし利得は自明ではない**。x86 では `lock xadd` (フルバリア、20 サイクル程度) が
+素の `mov` に変わるので単独所有の drop は速くなるが、共有されている drop には
+ロードが 1 本増える。さらに悪いことに、実際に競合しているとロードがキャッシュラインを
+Shared 状態で持ち込み、続く RMW が Shared→Exclusive のコヒーレンス昇格を余計に踏む。
+
+したがって「単独所有の drop」と「複数スレッドが共有バッファを drop する」の
+両方を測ってから判断する。`tests/loom.rs` と `tests/race_condition.rs` は必須。
+この案は本プランの値渡し化とは独立なので、値渡しを入れてから別に測るとよい。
 
 ## 検証方針
 
 - **asm** (主検証):
   - `fn drop_one(s: LeanString)`: 16 バイトのスタックコピー (`movups`/`movaps` の対) が
     消え、inline 変種の drop が「判別子の比較 + 早期 return」だけになること。
-  - `fn drop_vec(v: Vec<LeanString>)`: ループ本体が現状より短くなること (現状は
-    判別子比較 + `lock decq` + cold 呼び出しで、すでに悪くない)。
+  - `fn drop_vec(v: Vec<LeanString>)`: ループ本体が現状より短くなること。
   - x86-64 と aarch64 の両方。
 - **loom**: 全シナリオ。atomic の順序 (`Release` の decrement + 最終参照時の
   `Acquire` fence) は変えていないので、ここで落ちたら実装ミス。

@@ -22,11 +22,24 @@
 
 | 場所 | 現状 |
 | --- | --- |
-| `Extend<char>` (lib.rs:2011) | `try_reserve(size_hint)` 後、1 文字ずつ `push` |
-| `Extend<&char>` (lib.rs:2025) | 上へ委譲 |
-| `Extend<&str>` / `Box<str>` / `Cow` / `String` / `LeanString` / `LeanStr` (lib.rs:2031-2069) | 1 要素ずつ `push_str`。`size_hint` は使わない |
-| `FromIterator<char>` ほか (lib.rs:1899-2009) | 上と同じ経路 |
-| `LeanString::try_repeat` (lib.rs:818-831) | 最終長が既知なのに `try_push_str` のループ |
+| `Extend<char>` (lib.rs:2424) | `try_reserve(size_hint)` 後、1 文字ずつ `push` |
+| `Extend<&char>` (lib.rs:2438) | 上へ委譲 |
+| `Extend<&str>` / `Box<str>` / `Cow` / `String` / `LeanString` / `LeanStr` (lib.rs:2444-2482) | 1 要素ずつ `push_str`。`size_hint` は使わない |
+| `Extend<LeanString>` / `Extend<LeanStr>` for `String` (lib.rs:2484-2498) | 同上 (`String` 側なので対象外) |
+| `FromIterator<char>` (lib.rs:2278) | `try_with_capacity(size_hint)` 後、1 文字ずつ `push_str` |
+| `FromIterator<&str>` ほか (lib.rs:2311-2406) | `Extend` へ委譲 |
+| `LeanString::from_utf16_units` / `from_utf16_units_lossy` (lib.rs:239, 271) | `with_capacity` 後、1 文字ずつ `push` |
+| `LeanString::try_repeat` (lib.rs:1008-1022) | 最終長が既知なのに `try_push_str` のループ |
+
+`from_utf16` 系は UTF-16 のコード単位数を容量として渡すが、UTF-8 の必要長は
+BMP 内の非 ASCII で 1 単位あたり 3 バイトになるので、非 ASCII では確保が足りない。
+`String::from_utf16` も同じ見積もりなのでこれ自体は std と揃っているが、
+writer があれば grow の回数を減らせる。実測 (21 文字の日本語、UTF-8 で 63 バイト):
+
+```
+LeanString::from_utf16: alloc=1 realloc=3
+String::from_utf16:     alloc=1 realloc=2
+```
 
 `try_repeat` は最終容量も「新しく作った値なので unique である」ことも呼び出し前から
 分かっているので、writer が無くても改善できる。
@@ -71,13 +84,13 @@ impl Drop for Appender<'_> {
   頻度が低いので `#[cold]` にする。
 - panic 安全: イテレータの `next()` やユーザのクロージャが panic しても `Drop` で
   `set_len` が走り、「そこまで書いた分」で有効な状態に戻る。`retain` の
-  `SetLenOnDrop` (repr.rs:661-708) と同じ考え方。UTF-8 が途中で切れないよう、
+  `SetLenOnDrop` (repr.rs:671-719) と同じ考え方。UTF-8 が途中で切れないよう、
   長さは `push_bytes` の単位でしか進めない。
 - SAFETY 契約: `appender()` が `ensure_modifiable` と必要な `reserve` を済ませるので、
-  `ptr` への書き込みは `as_mut_ptr` (repr.rs:844-864) と同じ根拠で成立する。
+  `ptr` への書き込みは `as_mut_ptr` (repr.rs:862-882) と同じ根拠で成立する。
   `Appender` が生きている間に `repr` を触る経路が無いことは `&'a mut` が保証する。
 
-適用先はこのタスクでは `Extend` 系と `FromIterator` 系に限る。
+適用先はこのタスクでは `Extend` 系・`FromIterator` 系・`from_utf16` 系に限る。
 `fmt::Write::write_str` は単発の `push_str` なので現状のまま。
 
 ### 案2: `Extend<char>` だけを対象にした専用ループ
@@ -87,7 +100,7 @@ impl Drop for Appender<'_> {
 ### 案3: pub API 化
 
 見送り。ユーザが writer を直接使いたい動機は
-[plans/12](./12-deferred.md) の `format_lean!` 系マクロを検討するときに評価する。
+[plans/14](./14-deferred.md) の `format_lean!` 系マクロを検討するときに評価する。
 案1 の内部 API が安定すれば、そのときのバックエンドとして使える。
 
 ## 設計判断に必要な情報
@@ -105,7 +118,7 @@ impl Drop for Appender<'_> {
 
 ## `try_repeat` の先行対応
 
-writer とは独立に、`LeanString::try_repeat` (lib.rs:818-831) は
+writer とは独立に、`LeanString::try_repeat` (lib.rs:1008-1022) は
 「最終長を計算 → `Repr::new_with(total_len, |ptr| ...)` で 1 回確保して直接書く」
 形に置き換えられる。`new_with` (repr.rs:136-151) は既にあるので、
 このタスクの中で最初に片付けるとよい。
@@ -115,15 +128,17 @@ writer とは独立に、`LeanString::try_repeat` (lib.rs:818-831) は
 - **テスト**: 既存の `Extend`/`FromIterator` テストに加えて、
   (1) inline → heap を跨ぐ extend、(2) grow を複数回跨ぐ extend、
   (3) 途中で panic したとき長さが `push_bytes` の境界に落ちること、を追加する。
-  `tests/property.rs` に `collect::<LeanString>()` / `extend` と `String` の
-  等価性プロパティがあるか確認し、無ければ足す。
+  `tests/property.rs` には `collect::<LeanString>()` の等価性プロパティが既にある
+  (`collect_from_chars`)。`extend` 側は無いので足す。
 - **Miri**: 未初期化の余剰容量へ生ポインタで書くので全ターゲット必須。
 - **asm**: `fn collect_chars(it: impl Iterator<Item = char>) -> LeanString` 相当の
   ループ本体から、要素ごとの関数呼び出し・参照カウントのロード・判別子分岐が
   消えていること。
 - **criterion**: 現状 bench に extend 系が無いので追加する
-  (char 列の collect、短い `&str` 列の extend、`repeat`)。
+  (char 列の collect、短い `&str` 列の extend、`repeat`、`from_utf16`)。
   ベースラインを取ってから着手する。
+- **確保回数**: `from_utf16` の realloc 回数が減ること。カウントするグローバル
+  アロケータで測れる (`tests/out_of_memory.rs` に同種の仕組みがある)。
 
 ## 依存
 
