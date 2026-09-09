@@ -65,8 +65,8 @@ pub(crate) fn push_str(&mut self, string: &str) -> Result<(), ReserveError> {
 - `is_unique()` の `Acquire` は維持する。fast path で unique を観測してから書き込むのは
   既存の `reserve` 内と同じパターンで、順序を緩める変更はこのタスクではやらない。
 
-**現行の asm を見るかぎり、`reserve` の inline 側はすでにこの条件とほぼ同じ比較列に
-畳まれている** (§3 の `.LBB3_9` までの部分) ので、案A 単独では
+現行の asm を見るかぎり、`reserve` の inline 側はすでにこの条件とほぼ同じ比較列に
+畳まれている (§3 の `.LBB3_9` までの部分) ので、案A 単独では
 「`checked_add` が素の加算になる」程度の差しか出ない可能性が高い。
 
 ### 案B: 判別子を 1 回だけ読む内部形
