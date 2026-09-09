@@ -47,7 +47,7 @@
 
 | 欠落 | 所感 |
 | --- | --- |
-| `reserve_exact` / `try_reserve_exact` | **もっとも目立つ欠落**。`HeapBuffer::with_exact_capacity` (heap_buffer.rs:336) と `realloc` は既にあり、`Repr::reserve` (repr.rs:446) が `amortized_growth` しか使っていないだけ |
+| `reserve_exact` / `try_reserve_exact` | もっとも目立つ欠落。`HeapBuffer::with_exact_capacity` (heap_buffer.rs:336) と `realloc` は既にあり、`Repr::reserve` (repr.rs:446) が `amortized_growth` しか使っていないだけ |
 | `as_mut_str` / `try_as_mut_str` | `ensure_modifiable()` (repr.rs:831) してから `as_mut_ptr` (repr.rs:862) で `&mut str` を作る。機構は揃っている。CoW なので失敗しうる。`try_as_mut_str` を主にして panic 版を併設する形になる |
 | `into_boxed_str` | `Box::from(self.as_str())` で 1 行 |
 | `drain(range)` | `Drain` ガード型が要るので実装量は中。`tests/alloc_string.rs` にコメントアウトされた `test_drain*` がある |

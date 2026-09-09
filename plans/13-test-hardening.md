@@ -148,7 +148,7 @@ fallible な API の中にある以上これは契約違反になる。到達不
 [plans/04](./04-append-writer.md) がこれらの実装をまとめて書き換えるので、
 先に網を張っておきたい。
 
-## C-2. main で足した API のテストが薄い
+## E. main で足した API のテストが薄い
 
 v0.7.0 以降に足した公開 API のテスト状況を調べた。
 
@@ -179,7 +179,7 @@ v0.7.0 以降に足した公開 API のテスト状況を調べた。
 [plans/12](./12-mutability-conversion.md) の B が
 `FromIterator<LeanStr> for LeanStr` を書き換えるので、そこは先にテストを足す。
 
-## E. static バッファに対する `clear` のテストが無い
+## F. static バッファに対する `clear` のテストが無い
 
 `tests/lean_string.rs` の `clear_cow` (737-752) は inline と heap しか見ていない。
 static バッファでは `clear()` が容量を 0 にする ([plans/09](./09-doc-fixes.md) の A) ので、
@@ -189,7 +189,7 @@ doc の修正と合わせてテストを足す。
 テストが既にある (`pop_from_static` / `pop_from_static_cow` / `truncate_from_static` /
 `push_to_static` / `insert_to_static` / `shrink_to_static_buffer`)。`clear` だけが抜けている。
 
-## F. `retain` が何も削らない場合のテストが無い
+## G. `retain` が何も削らない場合のテストが無い
 
 `retain_cow` (tests/lean_string.rs:535-549) は heap と static のどちらも
 「実際に文字が削られる」ケースしか見ていない。
@@ -198,7 +198,7 @@ doc の修正と合わせてテストを足す。
 なお述語の呼び出し回数を数えるテスト (`retain_f_apply_count`, :516) は既にあるので、
 06 の変更で回数が変わらないことはそれで守られる。
 
-## G. `tests/const.rs` が static バッファを const 評価していない
+## H. `tests/const.rs` が static バッファを const 評価していない
 
 `from_static_str` は 16 バイト以下を inline バッファにする (repr.rs:110-121) ので、
 `tests/const.rs` が使っている "hello world" (11 バイト) と長さ 0..=16 のループは
@@ -208,7 +208,7 @@ doc の修正と合わせてテストを足す。
 (`StaticBuffer::new` と `tail_word()`、`slice::from_raw_parts` を const 評価で通る) が
 固定されていない。`as_bytes` や `StaticBuffer` を将来触ったときに黙って壊れる。
 
-## H. unsafe の契約が書かれていない箇所
+## I. unsafe の契約が書かれていない箇所
 
 安全性の問題は見つかっていないが、根拠が近くに書かれていない場所がある。
 このクレートは他の場所では丁寧に書いているので、揃えておきたい。
@@ -268,15 +268,15 @@ doc の修正と合わせてテストを足す。
 
 ## 進め方
 
-A → B → D → H の順が効率的。
+A → B → D → I の順が効率的。
 
 1. A は退行時の被害がもっとも大きい経路をカバーする。
    [plans/12](./12-mutability-conversion.md) の A の前提でもある。
 2. B は小さく、`write_fmt` のガードという退行しやすい箇所を守る。
    `try_from_fmt` の到達不能な分岐をどうするかの判断もここで済ませる。
 3. D は [plans/04](./04-append-writer.md) の前提。
-4. H はコードを変えないので、他のタスクと並行して進められる。
+4. I はコードを変えないので、他のタスクと並行して進められる。
 
-C / E / F / G は気づいたときに足していく。E と F はそれぞれ
+C / F / G / H は気づいたときに足していく。F と G はそれぞれ
 [plans/09](./09-doc-fixes.md) と [plans/06](./06-retain-shared-fast-path.md) の中で
 自然に片付く。
