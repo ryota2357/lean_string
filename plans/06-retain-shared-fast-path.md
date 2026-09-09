@@ -50,7 +50,7 @@ pub(crate) fn retain(&mut self, mut predicate: impl FnMut(char) -> bool) -> Resu
         return Ok(());   // 何も落ちなかった。確保なし・共有維持
     }
 
-    // ここから先は既存の実装。ただし走査済みの `0..idx` は複写不要なので、
+    // ここから先は既存の実装。ただし走査済みの `0..idx` はコピー不要なので、
     // src_idx = dst_idx = idx から再開する。
     self.ensure_modifiable()?;
     ...

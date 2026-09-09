@@ -34,7 +34,7 @@ probe_str_eq:
 
 ### `Arc<T>` 同士
 
-`Arc` には条件付きでポインタ比較の近道がある。ただし**適用範囲が直感と違う**。
+`Arc` には条件付きでポインタ比較の近道がある。ただし適用範囲が直感と違う。
 
 ```asm
 probe_arc_string_eq:                  # Arc<String>
@@ -81,7 +81,7 @@ criterion 中央値、`--warm-up-time 0.5 --measurement-time 1.5`。
 
 読み取れること。
 
-- **`eq/cloned` でバッファを共有するのは len 17 以上だけ**。16 以下は inline なので
+- `eq/cloned` でバッファを共有するのは len 17 以上だけ。16 以下は inline なので
   clone はビット単位のコピーであり、`eq` と `eq/cloned` は同じものを測っている。
   実際 16 以下では両者に系統的な差が無い。
 - 共有している len 256 でも `eq` (4.73 ns) より `eq/cloned` (5.89 ns) が速くならない。

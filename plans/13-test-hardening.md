@@ -24,15 +24,41 @@ static FAIL_NEXT_REALLOCATION: Cell<bool> = const { Cell::new(false) };
 | `Repr::reserve` の unique heap grow (repr.rs:479-486) | unique な heap に対する `try_reserve` / `try_push_str` | `realloc` が失敗したとき |
 | `Repr::shrink_to` のその場縮小 (repr.rs:561-564) | unique な heap に対する `try_shrink_to` | 同上 |
 
-テスト自体は難しくない。unique な heap の `LeanString` に余剰容量を持たせ、
-`FAIL_NEXT_REALLOCATION.set(true)` してから `try_into_lean_str()` を呼び、
+4 つとも到達可能で、いま書けば通ることをスクラッチのコピーで確認した
+(通常の `cargo test` と `cargo +nightly miri test` の両方。Miri は UB もリークも報告しない)。
 
-- `Err(ReserveError)` が返ること
-- 返ってきた文字列 (エラーと一緒に返る元の値) の内容が壊れていないこと
-- 容量も元のままであること
-- drop してもリークしないこと (CI の Miri が検出する)
+**ただし観測できる範囲が 2 つに分かれる**。
 
-を確認する。`into_exact` の失敗復元は 32-bit で長さ prefix の有無が変わるので、
+`try_reserve` と `try_shrink_to` は `&mut self` を取って返るので、失敗後の状態を
+そのまま検査できる。
+
+```rust
+// unique heap、capacity 20 に 19 バイト
+FAIL_NEXT_REALLOCATION.set(true);
+assert!(s.try_reserve(1000).is_err());
+assert_eq!(s.as_ptr(), before);      // ポインタが変わっていない
+assert_eq!(s.capacity(), 20);        // 容量も元のまま
+assert_eq!(s, "0123456789abcdefgh"); // 内容も無事
+assert!(s.is_heap_allocated());
+```
+
+これは `GlobalAlloc::realloc` の「失敗したら元のブロックはそのまま」という契約が
+このクレートの経路で守られていることの、端から端までの確認になる。
+
+一方 `try_into_lean_str` / `try_into_lean_string` は `self` を値で取り、失敗時には
+`ReserveError` しか返さない (lib.rs:1243-1254、lib.rs:1733-1744 の `mem::replace` +
+復元)。つまり呼び出し側からは**文字列の内容を検査できず、「1 回だけ drop されて
+リークしない」ことしか観測できない**。`into_exact` の失敗復元がもっとも入り組んだ
+unsafe なのに、そこがいちばん検査しにくい。
+
+- 短期的には「リークしないこと」をカウントするアロケータで固定する。
+  グローバルなカウンタになるので `--test-threads=1` が要る (並行するテストの
+  確保が混ざることを確認した)。
+- [plans/12](./12-mutability-conversion.md) の A で `&mut self` を取る形に変えれば、
+  `try_reserve` と同じように内容も検査できるようになる。**これは 12-A を採る理由の
+  1 つとして数えてよい**。
+
+`into_exact` の失敗復元は 32-bit で長さ prefix の有無が変わるので、
 Miri の i686 / powerpc ターゲットでも通ることを確認したい。
 
 このテストは [plans/12](./12-mutability-conversion.md) の A で
@@ -70,9 +96,20 @@ match args.as_str() {
   退行テストとして価値がある
 
 `src/traits.rs` の `try_from_fmt` にも同じ `args.as_str()` の fast path があるが、
-2 つの呼び出し元はどちらも `format_args!("{s}")` を渡すので `as_str()` は常に `None` になる。
-そちらは到達不能な分岐であり、テストで通すことはできない。
-**むしろ問題は、到達したときに `from_static_str` が panic しうること**で、
+**こちらは到達不能**であることを確認した。
+
+`fmt::Arguments::as_str()` が `Some` を返すのは、`format_args!` 全体がコンパイル時に
+固定文字列へ畳める場合に限る。リテラルを直接埋めた `format_args!("{}", "literal")` は
+`Some` になるが、変数を埋めた `format_args!("{s}")` は `s` の実行時の値が
+`&'static str` であっても `None` になる。`try_from_fmt` の 2 つの呼び出し元
+(traits.rs:77 と traits.rs:159) はどちらも `match_type!` の catch-all arm にあり、
+generic な `T: fmt::Display` の変数を埋めるので、常に `None` になる。
+
+スクラッチのコピーで `Some(str)` の arm に `panic!()` を置き、動くテスト全部 (70 以上) と
+doctest 71 件を走らせても一度も発火しなかった。`tests/out_of_memory.rs` は
+独自の `Display` 実装 3 種でこの関数を通しているが、それでも到達しない。
+
+**残しておく問題は、到達したときに `from_static_str` が panic しうること**。
 fallible な API の中にある以上これは契約違反になる。到達不能なら消し、
 残すなら `try_from_static_str` 相当を使う。どちらにするか決める。
 
@@ -82,11 +119,14 @@ fallible な API の中にある以上これは契約違反になる。到達不
 `from_around_inline_limit` / `from_static_str_around_inline_limit` /
 `clone_shares_heap_buffer`)。
 
-- `Hash` / `Ord` / `Borrow<str>` のテストが無い。
-  `HashMap<LeanStr, _>` に `&str` で引ける (`Borrow<str>` + `Hash` + `Eq` の整合) ことは
-  実装上は正しいが、固定するテストが無い。リポジトリ全体を見ても
-  `HashMap` / `BTreeMap` を使ったテストは 1 つも無い。
-- `LeanString` 側も `Ord` の直接のテストが無い。
+- `Hash` / `Borrow<str>` のテストが無い。`HashMap<LeanStr, _>` に `&str` で引ける
+  (`Borrow<str>` + `Hash` + `Eq` の整合) ことは実装上は正しいが、固定するテストが無い。
+  リポジトリ全体で `HashMap` / `HashSet` / `BTreeMap` / `BTreeSet` を使ったテストは 1 つも無い。
+- **`Ord` / `PartialOrd` は `LeanString` と `LeanStr` のどちらもまったくテストされていない**。
+  `.cmp(` や `.sort()` を使うテストがリポジトリに存在しない。
+  [plans/07](./07-equality-policy.md) の案1 を採ると `Ord` の実装を差し替えることになり、
+  「ポインタ一致だが長さが違う ⇒ 長さが順序を決める」という間違えやすい規則が入るので、
+  その前に網を張っておきたい。
 
 ## D. `Extend` の大半にテストが無い
 
@@ -96,17 +136,48 @@ fallible な API の中にある以上これは契約違反になる。到達不
 | --- | --- |
 | `Extend<char> for LeanString` | あり (tests/lean_string.rs:757、tests/alloc_string.rs:574) |
 | `Extend<&char> for LeanString` | あり (tests/alloc_string.rs:775) |
-| `Extend<String> for LeanString` | あり (tests/alloc_string.rs:581) |
-| `Extend<&str> for LeanString` | **無し** |
+| `Extend<&str> for LeanString` | あり (tests/alloc_string.rs:581、`vec![u]` の `u` は `&str`) |
+| `Extend<LeanString> for LeanString` | 間接的にあり (`FromIterator<LeanString> for LeanString` が使う) |
 | `Extend<Box<str>> for LeanString` | **無し** |
 | `Extend<Cow<str>> for LeanString` | **無し** |
-| `Extend<LeanString> for LeanString` | **無し** |
+| `Extend<String> for LeanString` | **無し** |
 | `Extend<LeanStr> for LeanString` | **無し** |
 | `Extend<LeanString> for String` | **無し** |
 | `Extend<LeanStr> for String` | **無し** |
 
 [plans/04](./04-append-writer.md) がこれらの実装をまとめて書き換えるので、
 先に網を張っておきたい。
+
+## C-2. main で足した API のテストが薄い
+
+v0.7.0 以降に足した公開 API のテスト状況を調べた。
+
+| 対象 | 統合テスト | doctest |
+| --- | --- | --- |
+| `from_utf16le` / `be` とその lossy (両型) | `tests/property.rs` のみ | あり (8 通りすべて) |
+| `as_static_str` (両型) | **無し** | あり |
+| `AsRef<Path>` (両型) | **無し** | **無し** (doc コメント自体が無い) |
+| `FromIterator` の 14 impl | 一部のみ (下表) | 無し |
+| `try_from_fmt` の OOM 処理 | あり (`tests/out_of_memory.rs` の 3 テスト) | — |
+
+`from_utf16le` / `be` は `tests/property.rs` にしかテストが無く、そのファイルは
+[plans/08](./08-test-toolchain.md) のとおり rustc 1.98.0 未満ではコンパイルできない。
+つまり手元の安定版によっては、この 4 メソッドを実際に動かすテストが doctest だけになる。
+
+`AsRef<Path>` は 1 行の実装だが、テストも doc コメントも無い。
+
+`FromIterator` は 14 impl のうちテストがあるのは 3 つだけ。
+
+| impl | テスト |
+| --- | --- |
+| `FromIterator<char> for LeanString` | あり |
+| `FromIterator<&str> for LeanString` | あり |
+| `FromIterator<LeanString> for LeanString` | あり (1 要素の再利用、共有の detach、空の 3 ケース) |
+| `FromIterator<String> for LeanString` | `tests/property.rs` のみ |
+| 残り 10 (`LeanStr` 向け 8 と `String` 向け 2、`Box<str>` / `Cow` 向け) | **無し** |
+
+[plans/12](./12-mutability-conversion.md) の B が
+`FromIterator<LeanStr> for LeanStr` を書き換えるので、そこは先にテストを足す。
 
 ## E. static バッファに対する `clear` のテストが無い
 
@@ -158,8 +229,11 @@ doc の修正と合わせてテストを足す。
 | `HeapBuffer::header` (heap_buffer.rs:312) | **safe fn** の中で生ポインタを参照へ変換している。`&GrowableHeader` を作れるということは非 atomic な `capacity` フィールドに触れられるということで、それが安全なのは「`capacity` は unique なときにしか書かれない」から。その根拠がどこにも書かれていない |
 | `Repr::from_inline` / `from_heap` / `from_static` の `transmute` (repr.rs:328/336/344) | 直後の `SAFETY:` コメントは `assert_unchecked` の根拠であって transmute の根拠ではない。とくに `from_inline` は任意の UTF-8 バイト列を `*const ()` フィールドに載せる。生ポインタには妥当性要件が無く、`as_bytes` / `as_mut_ptr` は `last_byte >= HeapMarker` のときしかフィールド 0 をポインタとして読まないので正しいが、その説明が無い |
 | `Repr::make_shallow_clone` の `ref_count_overflow` (repr.rs:267-271) | `unsafe { ptr::read(repr) }.replace_inner(Repr::new())` に `SAFETY:` が無い。直前の `fetch_add` で作った参照を消費して、panic で巻き戻る前にカウントを釣り合わせる、というのが意図 |
-| `HeapBuffer::dealloc` の本体 (heap_buffer.rs:233)、`realloc` の 32-bit layout 変換 arm (heap_buffer.rs:401) | `SAFETY:` コメントが無い |
-| `LeanString::from_utf8_unchecked` (lib.rs:207)、`LeanStr::from_utf8_unchecked` (lib.rs:1430) | 本体に "SAFETY: From `# Safety`, ..." の 1 行が無い。他の同種 API は書いている |
+| `HeapBuffer::dealloc` の本体 (heap_buffer.rs:233) | `SAFETY:` コメントが無い |
+| `realloc` の 32-bit layout 変換 arm (heap_buffer.rs:401-405) | `realloc` の他の部分は丁寧に書かれているのに、この arm だけ `SAFETY:` が無い |
+| `LeanString::from_utf8_unchecked` (lib.rs:208)、`LeanStr::from_utf8_unchecked` (lib.rs:1431) | 本体に "SAFETY: From `# Safety`, ..." の 1 行が無い。他の同種 API は書いている |
+| `from_utf16le` / `_lossy` / `from_utf16be` / `_lossy` の `buf.align_to::<u16>()` (lib.rs:310, 338, 383, 411) | `SAFETY:` コメントが無い。`u16` には無効なビットパターンが無いので健全だが、その説明が無い |
+| `Repr::from_char` (repr.rs:92-96) | `char::encode_utf8` の結果が必ず 4 バイト以下で `MAX_INLINE_SIZE` に収まる、という根拠が書かれていない |
 
 ### `LastByte` の網羅性
 
@@ -176,9 +250,21 @@ doc の修正と合わせてテストを足す。
 - `push_str` / `insert_str` / `remove` / `retain` は `as_mut_ptr` 経由で書くが、
   inline のときバイト 15 に届くのは `len == 16` の場合だけで、そこも UTF-8 の末尾バイト。
 
+バイト 15 に書き込む経路を全部洗い出して、どれも `LastByte` の定義済みの値に
+収まることを確認した。
+
+| 書き手 | 書く値 |
+| --- | --- |
+| `InlineBuffer::new` (LE64 版と可搬版の両方) | `0xC0 + len`、`len == 16` のときは文字列の最終バイト |
+| `InlineBuffer::empty` | `Length00` (`0xC0`) |
+| `InlineBuffer::set_len` | `0xC0 + len` (`len < 16` のときだけ。16 なら no-op) |
+| `TextLen::new` | 上位バイトに `HeapMarker` (`0xD0`) を OR。32-bit の `ON_THE_HEAP` 経路も同じ |
+| `HeapBuffer::set_len` / `realloc` / `into_exact` / `into_growable` | 同じ `TextLen` を引き継ぐだけで、独自に作り直さない |
+| `StaticBuffer::new` / `set_len` | 上位バイトに `StaticMarker` (`0xD1`) を OR |
+
 `src/repr/last_byte.rs` の冒頭コメントは UTF-8 の符号化規則は説明しているが、
 「この enum の網羅性が `Repr` の安全性要件になっている」ことは書かれていない。
-`Repr` の定義のところに 1 段落足したい。
+`Repr` の定義のところに 1 段落足したい。上の表がそのまま根拠になる。
 
 ## 進め方
 
