@@ -46,6 +46,11 @@ impl StaticBuffer {
         usize::from_le_bytes(bytes)
     }
 
+    pub(super) const fn as_str(&self) -> &'static str {
+        // SAFETY: `self.ptr` points to &'static str with valid `self.len()` length
+        unsafe { str::from_utf8_unchecked(slice::from_raw_parts(self.ptr.as_ptr(), self.len())) }
+    }
+
     /// # Safety
     /// - `len` bytes in the buffer must be valid UTF-8.
     /// - `len` must be less than or equal to the current length.

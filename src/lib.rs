@@ -20,7 +20,7 @@ use core::{
 use alloc::{borrow::Cow, boxed::Box, string::String};
 
 #[cfg(feature = "std")]
-use std::ffi::OsStr;
+use std::{ffi::OsStr, path::Path};
 
 mod repr;
 use repr::{Immutable, Mutable, Repr};
@@ -58,6 +58,7 @@ impl LeanString {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn new() -> Self {
         LeanString(Repr::new())
     }
@@ -79,6 +80,7 @@ impl LeanString {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn from_static_str(text: &'static str) -> Self {
         match Repr::from_static_str(text) {
             Ok(repr) => LeanString(repr),
@@ -86,11 +88,10 @@ impl LeanString {
         }
     }
 
-    /// Creates a new empty [`LeanString`] with at least capacity bytes.
+    /// Creates a new empty [`LeanString`] with at least `capacity` bytes.
     ///
-    /// A [`LeanString`] will inline strings if the length is less than or equal to
-    /// `2 * size_of::<usize>()` bytes. This means that the minimum capacity of a [`LeanString`]
-    /// is `2 * size_of::<usize>()` bytes.
+    /// The returned [`LeanString`] has a capacity of at least `2 * size_of::<usize>()` bytes,
+    /// the size of the inline (on the stack) storage.
     ///
     /// # Panics
     ///
@@ -122,6 +123,7 @@ impl LeanString {
     /// assert!(s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         LeanString::try_with_capacity(capacity).unwrap_with_msg()
     }
@@ -181,6 +183,7 @@ impl LeanString {
     /// assert_eq!(string, "Hello �World");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf8_lossy(buf: &[u8]) -> Self {
         let mut ret = LeanString::with_capacity(buf.len());
         for chunk in buf.utf8_chunks() {
@@ -200,6 +203,7 @@ impl LeanString {
     /// This function is unsafe because it does not check that the bytes passed to it are valid
     /// UTF-8. If this constraint is violated, it may cause memory unsafety issues.
     #[inline]
+    #[must_use]
     pub unsafe fn from_utf8_unchecked(buf: &[u8]) -> Self {
         let str = unsafe { str::from_utf8_unchecked(buf) };
         LeanString::from(str)
@@ -228,12 +232,20 @@ impl LeanString {
     /// ```
     #[inline]
     pub fn from_utf16(buf: &[u16]) -> Result<Self, FromUtf16Error> {
-        let mut ret = LeanString::with_capacity(buf.len());
-        for c in char::decode_utf16(buf.iter().copied()) {
-            match c {
-                Ok(c) => ret.push(c),
-                Err(_) => return Err(FromUtf16Error),
-            }
+        Self::from_utf16_units(buf.iter().copied(), buf.len())
+    }
+
+    #[inline]
+    fn from_utf16_units(
+        units: impl Iterator<Item = u16>,
+        capacity: usize,
+    ) -> Result<Self, FromUtf16Error> {
+        let mut ret = LeanString::with_capacity(capacity);
+        for c in char::decode_utf16(units) {
+            let Ok(c) = c else {
+                return Err(FromUtf16Error { kind: FromUtf16ErrorKind::LoneSurrogate });
+            };
+            ret.push(c);
         }
         Ok(ret)
     }
@@ -250,10 +262,164 @@ impl LeanString {
     /// assert_eq!(LeanString::from_utf16_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf16_lossy(buf: &[u16]) -> Self {
-        char::decode_utf16(buf.iter().copied())
-            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
-            .collect()
+        Self::from_utf16_units_lossy(buf.iter().copied(), buf.len())
+    }
+
+    #[inline]
+    fn from_utf16_units_lossy(units: impl Iterator<Item = u16>, capacity: usize) -> Self {
+        let mut ret = LeanString::with_capacity(capacity);
+        for c in char::decode_utf16(units) {
+            ret.push(c.unwrap_or(char::REPLACEMENT_CHARACTER));
+        }
+        ret
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanString`], returning an error if `buf`
+    /// has an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16le(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x00, 0xD8, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert!(LeanString::from_utf16le(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16le(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        let (chunks, []) = buf.as_chunks::<2>() else {
+            return Err(FromUtf16Error { kind: FromUtf16ErrorKind::OddBytes });
+        };
+        match (cfg!(target_endian = "little"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16(buf),
+            _ => {
+                Self::from_utf16_units(chunks.iter().copied().map(u16::from_le_bytes), chunks.len())
+            }
+        }
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanString`], replacing invalid code
+    /// points with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x1E, 0xDD, 0x69, 0x00,
+    ///     0x63, 0x00, 0x34, 0xD8,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16le_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16le_lossy(buf: &[u8]) -> Self {
+        match (cfg!(target_endian = "little"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16_lossy(buf),
+            (true, ([], buf, [_remainder])) => LeanString::from_utf16_lossy(buf) + "\u{FFFD}",
+            _ => {
+                let (chunks, remainder) = buf.as_chunks::<2>();
+                let string = Self::from_utf16_units_lossy(
+                    chunks.iter().copied().map(u16::from_le_bytes),
+                    chunks.len(),
+                );
+                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+            }
+        }
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanString`], returning an error if `buf`
+    /// has an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16be(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0xD8, 0x00, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert!(LeanString::from_utf16be(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16be(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        let (chunks, []) = buf.as_chunks::<2>() else {
+            return Err(FromUtf16Error { kind: FromUtf16ErrorKind::OddBytes });
+        };
+        match (cfg!(target_endian = "big"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16(buf),
+            _ => {
+                Self::from_utf16_units(chunks.iter().copied().map(u16::from_be_bytes), chunks.len())
+            }
+        }
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanString`], replacing invalid code
+    /// points with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0xDD, 0x1E, 0x00, 0x69,
+    ///     0x00, 0x63, 0xD8, 0x34,
+    /// ];
+    /// assert_eq!(LeanString::from_utf16be_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16be_lossy(buf: &[u8]) -> Self {
+        match (cfg!(target_endian = "big"), unsafe { buf.align_to::<u16>() }) {
+            (true, ([], buf, [])) => LeanString::from_utf16_lossy(buf),
+            (true, ([], buf, [_remainder])) => LeanString::from_utf16_lossy(buf) + "\u{FFFD}",
+            _ => {
+                let (chunks, remainder) = buf.as_chunks::<2>();
+                let string = Self::from_utf16_units_lossy(
+                    chunks.iter().copied().map(u16::from_be_bytes),
+                    chunks.len(),
+                );
+                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+            }
+        }
     }
 
     /// Returns the length of the string in bytes, not [`char`] or graphemes.
@@ -270,6 +436,7 @@ impl LeanString {
     /// assert_eq!(fancy_f.chars().count(), 3);
     /// ```
     #[inline]
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.0.len()
     }
@@ -287,15 +454,19 @@ impl LeanString {
     /// assert!(!s.is_empty());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
     /// Returns the capacity of the [`LeanString`], in bytes.
     ///
-    /// A [`LeanString`] will inline strings if the length is less than or equal to
-    /// `2 * size_of::<usize>()` bytes. This means that the minimum capacity of a [`LeanString`]
-    /// is `2 * size_of::<usize>()` bytes.
+    /// # Note
+    ///
+    /// - [`LeanString`] backed by a `&'static str` does not write the underlying byte data, so its
+    ///   capacity matches its current length.
+    /// - Otherwise, it at least `2 * size_of::<usize>()` bytes, which is the size of the inline (on
+    ///   the stack) storage.
     ///
     /// # Examples
     ///
@@ -314,7 +485,19 @@ impl LeanString {
     /// let s = LeanString::with_capacity(100);
     /// assert_eq!(s.capacity(), 100);
     /// ```
+    ///
+    /// ## `&'static str` capacity
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut s = LeanString::from_static_str("Long text but static lifetime");
+    /// assert_eq!(s.capacity(), s.len());
+    ///
+    /// s.truncate(4);
+    /// assert_eq!(s.capacity(), 4);
+    /// ```
     #[inline]
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.0.capacity()
     }
@@ -329,6 +512,7 @@ impl LeanString {
     /// assert_eq!(s.as_str(), "foo");
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -343,6 +527,7 @@ impl LeanString {
     /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
@@ -409,8 +594,8 @@ impl LeanString {
 
     /// Shrinks the capacity of the [`LeanString`] to match its length.
     ///
-    /// The resulting capacity is always greater than `2 * size_of::<usize>()` bytes because
-    /// [`LeanString`] has inline (on the stack) storage.
+    /// Only a heap buffer can shrink. This is a no-op for a [`LeanString`] stored inline or
+    /// backed by a `&'static str`.
     ///
     /// If this [`LeanString`] is not unique and its capacity is greater than its length, it is
     /// cloned first, because the capacity it shares with others must be left as it is.
@@ -463,8 +648,8 @@ impl LeanString {
 
     /// Shrinks the capacity of the [`LeanString`] with a lower bound.
     ///
-    /// The resulting capacity is always greater than `2 * size_of::<usize>()` bytes because the
-    /// [`LeanString`] has inline (on the stack) storage.
+    /// Only a heap buffer can shrink. This is a no-op for a [`LeanString`] stored inline or
+    /// backed by a `&'static str`.
     ///
     /// If this [`LeanString`] is not unique and its capacity will be changed, it is cloned first,
     /// because the capacity it shares with others must be left as it is.
@@ -602,6 +787,9 @@ impl LeanString {
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
     /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::push_str()`].
+    ///
+    /// On failure, `self` is left unchanged because capacity is reserved before `string` is
+    /// written.
     #[inline]
     pub fn try_push_str(&mut self, string: &str) -> Result<(), ReserveError> {
         self.0.push_str(string)
@@ -611,9 +799,10 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if **any** of the following conditions:
+    /// Panics if **any** of the following conditions is met:
     ///
-    /// 1. `idx` is larger than or equal tothe [`LeanString`]'s length, or if it does not lie on a [`char`]
+    /// 1. `idx` is larger than or equal to the [`LeanString`]'s length, or it does not lie on a
+    ///    [`char`] boundary.
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
     ///
     /// For 2, if you want to handle such a problem manually, use [`LeanString::try_remove()`].
@@ -701,7 +890,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if **any** of the following conditions:
+    /// Panics if **any** of the following conditions is met:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`]
     ///    boundary.
@@ -747,7 +936,7 @@ impl LeanString {
     ///
     /// # Panics
     ///
-    /// Panics if **any** of the following conditions:
+    /// Panics if **any** of the following conditions is met:
     ///
     /// 1. `idx` is larger than the [`LeanString`]'s length, or if it does not lie on a [`char`] boundary.
     /// 2. The system is out-of-memory when cloning the [`LeanString`].
@@ -805,6 +994,7 @@ impl LeanString {
     /// assert_eq!(s.repeat(0), "");
     /// ```
     #[inline]
+    #[must_use]
     pub fn repeat(&self, n: usize) -> Self {
         self.try_repeat(n).unwrap_with_msg()
     }
@@ -985,8 +1175,35 @@ impl LeanString {
     /// assert!(s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub fn is_heap_allocated(&self) -> bool {
         self.0.is_heap_buffer()
+    }
+
+    /// Returns the underlying `&'static str` if this [`LeanString`] holds one, or `None` otherwise.
+    ///
+    /// Note that strings short enough to be inlined into the local storage will return `None`, even
+    /// if if created with [`LeanString::from_static_str`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let s = LeanString::from_static_str("Long text but static lifetime");
+    /// assert_eq!(s.as_static_str(), Some("Long text but static lifetime"));
+    ///
+    /// // Not holding a `&'static str`.
+    /// let s = LeanString::from("Long text but heap allocated!");
+    /// assert_eq!(s.as_static_str(), None);
+    ///
+    /// // Short enough to be copied into the inline storage.
+    /// let s = LeanString::from_static_str("short");
+    /// assert_eq!(s.as_static_str(), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn as_static_str(&self) -> Option<&'static str> {
+        self.0.as_static_str()
     }
 
     /// Converts the [`LeanString`] into a [`LeanStr`].
@@ -1011,6 +1228,7 @@ impl LeanString {
     /// assert_eq!(s, "This is a heap-allocated string!!");
     /// ```
     #[inline]
+    #[must_use]
     pub fn into_lean_str(self) -> LeanStr {
         self.try_into_lean_str().unwrap_with_msg()
     }
@@ -1121,6 +1339,7 @@ impl LeanStr {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn new() -> Self {
         LeanStr(Repr::new())
     }
@@ -1141,6 +1360,7 @@ impl LeanStr {
     /// assert!(!s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn from_static_str(text: &'static str) -> Self {
         match Repr::from_static_str(text) {
             Ok(repr) => LeanStr(repr),
@@ -1194,6 +1414,7 @@ impl LeanStr {
     /// assert_eq!(string, "Hello �World");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf8_lossy(buf: &[u8]) -> Self {
         LeanString::from_utf8_lossy(buf).into_lean_str()
     }
@@ -1205,6 +1426,7 @@ impl LeanStr {
     /// This function is unsafe because it does not check that the bytes passed to it are valid
     /// UTF-8. If this constraint is violated, it may cause memory unsafety issues.
     #[inline]
+    #[must_use]
     pub unsafe fn from_utf8_unchecked(buf: &[u8]) -> Self {
         let str = unsafe { str::from_utf8_unchecked(buf) };
         LeanStr::from(str)
@@ -1248,8 +1470,117 @@ impl LeanStr {
     /// assert_eq!(LeanStr::from_utf16_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
     /// ```
     #[inline]
+    #[must_use]
     pub fn from_utf16_lossy(buf: &[u16]) -> Self {
         LeanString::from_utf16_lossy(buf).into_lean_str()
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanStr`], returning an error if `buf` has
+    /// an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16le(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16LE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x00, 0xD8, 0x69, 0x00, 0x63, 0x00,
+    /// ];
+    /// assert!(LeanStr::from_utf16le(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16le(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        LeanString::from_utf16le(buf).map(|x| x.into_lean_str())
+    }
+
+    /// Decodes a slice of UTF-16LE encoded bytes to a [`LeanStr`], replacing invalid code points
+    /// with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0x34, 0xD8, 0x1E, 0xDD, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x1E, 0xDD, 0x69, 0x00,
+    ///     0x63, 0x00, 0x34, 0xD8,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16le_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16le_lossy(buf: &[u8]) -> Self {
+        LeanString::from_utf16le_lossy(buf).into_lean_str()
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanStr`], returning an error if `buf` has
+    /// an odd number of bytes, or contains any invalid code points.
+    ///
+    /// # Examples
+    ///
+    /// ## valid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞music
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16be(v).unwrap(), "𝄞music");
+    /// ```
+    ///
+    /// ## invalid UTF-16BE
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mu<invalid>ic
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0xD8, 0x00, 0x00, 0x69, 0x00, 0x63,
+    /// ];
+    /// assert!(LeanStr::from_utf16be(v).is_err());
+    /// ```
+    #[inline]
+    pub fn from_utf16be(buf: &[u8]) -> Result<Self, FromUtf16Error> {
+        LeanString::from_utf16be(buf).map(|x| x.into_lean_str())
+    }
+
+    /// Decodes a slice of UTF-16BE encoded bytes to a [`LeanStr`], replacing invalid code points
+    /// with the [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// If `buf` has an odd number of bytes, the trailing byte is also replaced with the
+    /// [`char::REPLACEMENT_CHARACTER`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// // 𝄞mus<invalid>ic<invalid>
+    /// let v = &[
+    ///     0xD8, 0x34, 0xDD, 0x1E, 0x00, 0x6d, 0x00, 0x75, 0x00, 0x73, 0xDD, 0x1E, 0x00, 0x69,
+    ///     0x00, 0x63, 0xD8, 0x34,
+    /// ];
+    /// assert_eq!(LeanStr::from_utf16be_lossy(v), "𝄞mus\u{FFFD}ic\u{FFFD}");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_utf16be_lossy(buf: &[u8]) -> Self {
+        LeanString::from_utf16be_lossy(buf).into_lean_str()
     }
 
     /// Returns a string slice containing the entire [`LeanStr`].
@@ -1262,6 +1593,7 @@ impl LeanStr {
     /// assert_eq!(s.as_str(), "foo");
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -1276,6 +1608,7 @@ impl LeanStr {
     /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
@@ -1294,6 +1627,7 @@ impl LeanStr {
     /// assert_eq!(fancy_f.chars().count(), 3);
     /// ```
     #[inline]
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.0.len()
     }
@@ -1308,6 +1642,7 @@ impl LeanStr {
     /// assert!(!LeanStr::from("foo").is_empty());
     /// ```
     #[inline]
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -1332,8 +1667,35 @@ impl LeanStr {
     /// assert!(s.is_heap_allocated());
     /// ```
     #[inline]
+    #[must_use]
     pub fn is_heap_allocated(&self) -> bool {
         self.0.is_heap_buffer()
+    }
+
+    /// Returns the underlying `&'static str` if this [`LeanStr`] holds one, or `None` otherwise.
+    ///
+    /// Note that strings short enough to be inlined into the local storage will return `None`, even
+    /// if if created with [`LeanStr::from_static_str`]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from_static_str("Long text but static lifetime");
+    /// assert_eq!(s.as_static_str(), Some("Long text but static lifetime"));
+    ///
+    /// // Not holding a `&'static str`.
+    /// let s = LeanStr::from("Long text but heap allocated!");
+    /// assert_eq!(s.as_static_str(), None);
+    ///
+    /// // Short enough to be copied into the inline storage.
+    /// let s = LeanStr::from_static_str("short");
+    /// assert_eq!(s.as_static_str(), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn as_static_str(&self) -> Option<&'static str> {
+        self.0.as_static_str()
     }
 
     /// Converts the [`LeanStr`] into a [`LeanString`].
@@ -1356,6 +1718,7 @@ impl LeanStr {
     /// assert_eq!(s, "This is a heap-allocated string!!");
     /// ```
     #[inline]
+    #[must_use]
     pub fn into_lean_string(self) -> LeanString {
         self.try_into_lean_string().unwrap_with_msg()
     }
@@ -1505,6 +1868,22 @@ impl AsRef<OsStr> for LeanStr {
     #[inline]
     fn as_ref(&self) -> &OsStr {
         OsStr::new(self.as_str())
+    }
+}
+
+#[cfg(feature = "std")]
+impl AsRef<Path> for LeanString {
+    #[inline]
+    fn as_ref(&self) -> &Path {
+        Path::new(self.as_str())
+    }
+}
+
+#[cfg(feature = "std")]
+impl AsRef<Path> for LeanStr {
+    #[inline]
+    fn as_ref(&self) -> &Path {
+        Path::new(self.as_str())
     }
 }
 
@@ -1996,6 +2375,24 @@ impl FromIterator<LeanString> for LeanString {
     }
 }
 
+impl FromIterator<LeanStr> for LeanString {
+    fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
+        let mut iter = iter.into_iter();
+        let Some(first) = iter.next() else {
+            return LeanString::new();
+        };
+        let mut buf = first.into_lean_string();
+        buf.extend(iter);
+        buf
+    }
+}
+
+impl FromIterator<LeanString> for LeanStr {
+    fn from_iter<T: IntoIterator<Item = LeanString>>(iter: T) -> Self {
+        LeanString::from_iter(iter).into_lean_str()
+    }
+}
+
 impl FromIterator<LeanStr> for LeanStr {
     fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
@@ -2005,6 +2402,22 @@ impl FromIterator<LeanStr> for LeanStr {
         };
         buf.extend(iter);
         buf.into_lean_str()
+    }
+}
+
+impl FromIterator<LeanString> for String {
+    fn from_iter<T: IntoIterator<Item = LeanString>>(iter: T) -> Self {
+        let mut buf = String::new();
+        buf.extend(iter);
+        buf
+    }
+}
+
+impl FromIterator<LeanStr> for String {
+    fn from_iter<T: IntoIterator<Item = LeanStr>>(iter: T) -> Self {
+        let mut buf = String::new();
+        buf.extend(iter);
+        buf
     }
 }
 

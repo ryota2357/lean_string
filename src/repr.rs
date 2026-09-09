@@ -218,6 +218,16 @@ impl<M: Mutability> Repr<M> {
     }
 
     #[inline]
+    pub(crate) const fn as_static_str(&self) -> Option<&'static str> {
+        if self.is_static_buffer() {
+            // SAFETY: We just checked that `self` is StaticBuffer
+            Some(unsafe { self.as_static_buffer() }.as_str())
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     pub(crate) fn is_unique(&self) -> bool {
         if self.is_heap_buffer() {
             // SAFETY: We just checked the discriminant to make sure we're heap allocated
