@@ -1,37 +1,36 @@
-# 比較演算にポインタ一致の近道を入れるか
+# 比較演算をどこまで速くできるか
 
-調査日: 2026-08-16 / 対象: `8f7fa75` (v0.7.0 + bench deps 更新)
+調査日: 2026-09-09 / 対象: `448a538`
 
-CoW である `LeanString` / `LeanStr` は clone がバッファを共有するので、
-「同じバッファを指す 2 つのハンドルの比較」は内容を見るまでもなく結果が決まる。
-これを `PartialEq` / `Ord` に組み込むべきかを検討した記録。結論は
-[plans/07](../plans/07-equality-policy.md) にまとめてある。
+`LeanString` / `LeanStr` の `PartialEq` / `Ord` はどちらも
+`self.as_str().eq(other.as_str())` である。ここを速くする手が 3 つあり、
+効く場面と必要な前提が違う。選択肢と推奨は [plans/07](../plans/07-equality-policy.md) に書いた。
 
 ## 1. 現状の codegen
 
 `probe_eq(&LeanString, &LeanString)` の asm は
-[codegen-baseline.md](./codegen-baseline.md) の §6 のとおり、
+[codegen-baseline.md](./codegen-baseline.md) の §6 のとおり、33 命令で
 「両辺の len を branchless に復元 → len 比較 → データポインタを cmov で選択 → `bcmp`」。
 無駄な分岐も再読み込みもない。`as_str()` 同士を比較するだけの実装として、
 これ以上削るところはない。
 
 ## 2. `str` と `Arc<T>` は何をしているか
 
-同じ環境で比較対象の codegen も測った。
+同じ環境で比較対象の codegen も測った (rustc 1.94.1)。
 
 ### `str` 同士
 
 ```asm
 probe_str_eq:
 	cmpq	%rcx, %rsi          # len == len ?
-	jne	.LBB19_1
+	jne	.LBB23_1
 	callq	*bcmp@GOTPCREL(%rip)  # 同じポインタでも全長を舐める
 ```
 
-`&str` は fat pointer なので「ポインタと長さが同じなら比較は済んでいるはず」と考えたく
-なるが、core の str/slice 比較は**長さしか見ない**。データポインタが一致していても
-`bcmp` が全長を走る (glibc の `memcmp`/`bcmp` にも自己比較の早期 return はない)。
-一般の文字列ではポインタ一致が稀で、チェックが無駄になるためと考えられる。
+`&str` は fat pointer なので「ポインタと長さが同じなら比較は済んでいるはず」と
+考えたくなるが、core の str/slice 比較は**長さしか見ない**。データポインタが
+一致していても `bcmp` が全長を走る (glibc の `memcmp`/`bcmp` にも自己比較の
+早期 return はない)。一般の文字列ではポインタ一致が稀で、チェックが無駄になるためと考えられる。
 
 ### `Arc<T>` 同士
 
@@ -42,9 +41,9 @@ probe_arc_string_eq:                  # Arc<String>
 	movq	(%rdi), %rax
 	movq	(%rsi), %rcx
 	cmpq	%rcx, %rax          # ★ポインタ一致なら
-	je	.LBB7_1
+	je	.LBB6_1
 	...
-.LBB7_1:
+.LBB6_1:
 	movb	$1, %al             # ★即 true
 	retq
 ```
@@ -68,83 +67,58 @@ probe_arc_str_eq:                     # Arc<str>
 
 ## 3. ベンチマーク
 
-`bench/benches/apis.rs` の `eq` (別々に構築した 2 値) と `eq/cloned` (一方を clone した値)
-を実行した結果 (criterion 中央値、`--warm-up-time 0.5 --measurement-time 1.5`)。
+`bench/benches/apis.rs` の `eq` (別々に構築した 2 値) と `eq/cloned` (一方を clone した値)。
+criterion 中央値、`--warm-up-time 0.5 --measurement-time 1.5`。
 
-| len | eq: LeanString | eq/cloned: LeanString | eq: `String` |
-| --- | --- | --- | --- |
-| 0 | 2.3711 ns | 2.4451 ns | 108.56 ns |
-| 1 | 2.4279 ns | 2.3697 ns | 1.6244 ns |
-| 15 | 2.4106 ns | 2.3676 ns | 1.6449 ns |
-| 16 | 2.3735 ns | 2.3758 ns | 1.6226 ns |
-| 17 | 2.4852 ns | 2.6895 ns | 1.6087 ns |
-| 256 | 5.3800 ns | 4.6788 ns | 4.4291 ns |
+| len | eq: LeanString | eq/cloned: LeanString | eq: `String` | eq/cloned: `String` |
+| --- | --- | --- | --- | --- |
+| 0 | 2.4520 ns | 2.3893 ns | 86.124 ns | 86.940 ns |
+| 1 | 2.2543 ns | 2.0018 ns | 1.6352 ns | 1.6568 ns |
+| 15 | 2.1949 ns | 2.3842 ns | 1.5034 ns | 1.2175 ns |
+| 16 | 2.1893 ns | 2.3729 ns | 1.7785 ns | 1.6825 ns |
+| 17 | 2.7725 ns | 2.4328 ns | 1.3889 ns | 1.7226 ns |
+| 256 | 4.7258 ns | 5.8939 ns | 4.2563 ns | 3.5055 ns |
 
 読み取れること。
 
 - **`eq/cloned` でバッファを共有するのは len 17 以上だけ**。16 以下は inline なので
   clone はビット単位のコピーであり、`eq` と `eq/cloned` は同じものを測っている。
-- 共有している len 256 で `eq` 5.38 ns → `eq/cloned` 4.68 ns の差が出ているが、
-  これはポインタ一致による近道ではなく (現状そんな近道はない)、
-  同じ 256 バイトのバッファを 2 回読むためのキャッシュ局所性による。
-- `String` の len 0 が 108 ns なのは `String` 側の性質。空の `String` はデータポインタが
-  dangling なので、`memcmp` がそのアドレスに対して毎回ペナルティを踏んでいると思われる。
-  `LeanString` は空文字列も inline なので影響を受けない (2.37 ns)。
-- LeanString が `String` より 0.7 ns 程度遅いのは、len を復元する分の命令が
+  実際 16 以下では両者に系統的な差が無い。
+- 共有している len 256 でも `eq` (4.73 ns) より `eq/cloned` (5.89 ns) が速くならない。
+  当然で、現状ポインタ一致の近道は入っていないため、どちらも 256 バイトを舐める。
+- LeanString が `String` より 0.5〜0.7 ns 遅いのは、len を復元する分の命令が
   余計に載っているため。これは 16 バイト表現の構造的なコストで、
   比較の実装を変えて消えるものではない。
+- `String` の len 0 が 86 ns なのは `String` 側の性質。空の `String` はデータポインタが
+  dangling なので、`memcmp` がそのアドレスに対して毎回ペナルティを踏んでいると思われる。
+  `LeanString` は空文字列も inline なので影響を受けない (2.45 ns)。
 
-## 4. 他のクレートでの扱い
+**この規模の差はプロセス間のばらつきと同程度**である。別の実行では同じ構成で
+`eq/current/1` が 2.25 ns と 2.94 ns の両方を観測した。コード配置とアラインメントで
+1 ns 弱は動くので、以降の判断はこの表の絶対値ではなく、
+同一バイナリ内での A/B (近道の有無を cfg で切り替えるなど) に基づくべきである。
 
-### `ecow` (typst/ecow) — [issue #35](https://github.com/typst/ecow/issues/35)
+**このベンチには「一致しない 2 値」の点が無い**。`samples()` から作った同一内容の
+2 値しか測っていないので、常に全長を舐める最悪ケースだけを見ている。
+近道の導入を判断するには「先頭バイトで不一致になる最速ケース」が必要で、
+そこが近道のコストを最も強く受ける。ベンチの追加が前提条件になる。
 
-2023-10-10 に epage から「`Arc<str>` は先にポインタを比較するが、通常の参照の等価比較は
-それをしない」という趣旨で提案された (ベンチマークへのリンク付き)。
-issue は enhancement ラベル付きでクローズされている。
+## 4. 3 つの案
 
-対応するコミットは**存在するが main には入っていない**。
-`ptr-eq` ブランチの `fa87e6f` ("Add pointer equality comparison for `EcoString`",
-2023-11-27, メッセージに `Fixes #35`) が
+### 案1: 共有バッファのポインタ近道
 
-- `DynamicVec` の `PartialEq` に「**両辺とも spilled (ヒープ) のとき**だけ
-  `EcoVec::ptr_eq` を先に見る」近道を入れ、
-- `EcoVec::ptr_eq` を **pub API として公開**する
-
-という内容。inline 変種を条件から外して、inline 同士の比較には一切コストを乗せない
-作りになっている。このブランチは 2 年以上マージされておらず、
-現在の `ecow` の `PartialEq for EcoString` は `self.as_str().eq(other.as_str())` のまま、
-`ptr_eq` も公開されていない。
-
-この経緯は「近道自体は書けるが、既定の `==` に組み込むかは別の判断」という
-本タスクの論点と一致している。設計として参考になるのは次の 2 点。
-
-1. **近道を適用する条件をバッファ種別で絞る**。inline 同士では絶対に一致しないので、
-   その組み合わせを条件から外せば、もっとも速い経路に命令を足さずに済む。
-2. **`ptr_eq` を pub にする**。既定の比較を変えなくても、必要な利用側は
-   自分で前置できるようになる。
-
-### `compact_str`
-
-比較は `as_str()` 同士のまま。ポインタ一致の近道は入っていない。
-そもそも clone がバッファを共有しない (CoW ではない) ので、動機が無い。
-
-### `char_str` (astral-sh/char_str)
-
-`Repr` に `content_eq` / `content_cmp` を持ち、同型同士と相互比較の `PartialEq`/`Ord` から
-呼んでいる。
+`char_str` (v0.0.4, main にマージ済み) が `Repr::content_eq` / `content_cmp` として持っている。
 
 ```rust
 pub(crate) fn content_eq(&self, other: &Self) -> bool {
     let this = self.as_bytes();
     let other = other.as_bytes();
-    // 共有された growable / static バッファはハンドルごとに論理長が異なりうる。
     this.len() == other.len() && (ptr::eq(this.as_ptr(), other.as_ptr()) || this == other)
 }
 
 pub(crate) fn content_cmp(&self, other: &Self) -> cmp::Ordering {
     let this = self.as_bytes();
     let other = other.as_bytes();
-    // データポインタが一致するなら共通の接頭辞は同一なので、長さが順序を決める。
     if ptr::eq(this.as_ptr(), other.as_ptr()) {
         this.len().cmp(&other.len())
     } else {
@@ -159,34 +133,111 @@ pub(crate) fn content_cmp(&self, other: &Self) -> cmp::Ordering {
 
 設計上、注意すべき点が 2 つある。
 
-- `content_cmp` の「ポインタ一致だが長さが違う ⇒ 接頭辞関係」の扱い。
-  ここで `Equal` を返すと誤り。`truncate` などで「同じポインタ・異なる長さ」の
-  ハンドルが作れるため、長さの比較が順序になる。
-- inline バッファでは `as_bytes()` のポインタが `self` 自身のアドレスになるので、
-  **別インスタンス同士でポインタが一致することはない**。つまりこの近道は
-  heap と static にしか効かず、inline 同士では 1 比較ぶんの純粋な追加コストになる。
+- **長さの比較を先に置くのは正しさのため**。共有された heap / static バッファは
+  ハンドルごとに論理長が異なりうる。64-bit の `truncate_unchecked` は共有バッファに対して
+  ハンドル側の `TextLen` ワードだけを縮め (repr.rs:783-790)、`StaticBuffer::set_len` も同様。
+  `content_cmp` の「ポインタ一致だが長さが違う ⇒ 接頭辞関係なので長さが順序を決める」も
+  同じ理由による。ここで `Equal` を返すと誤り。
+- **inline には効かない**。inline バッファでは `as_bytes()` のポインタが `self` 自身の
+  アドレスになるので、別インスタンス同士でポインタが一致することはない。
+  つまりこの近道は heap と static にしか効かず、inline 同士では 1 比較ぶんの
+  純粋な追加コストになる。
 
-`char_str` には未マージのブランチが 2 本あり、どちらもこの
-「inline に効かない」問題への別々の答えになっている (どちらも計測値は残っていない)。
+`ecow` も同じ論点で止まっている。issue #35 は completed としてクローズされているが、
+実装は `ptr-eq` ブランチに残ったままで main には入っていない
+([related-crates.md](./related-crates.md) の該当節を参照)。
+`ecow` の実装は「両辺とも spilled (ヒープ) のときだけ」という条件でこの問題に対処していた。
 
-- 論理長が inline 上限以下のとき、両端からのワード単位 XOR で比較する
-  (`bcmp` の呼び出しを避ける)。論理長の範囲しか読まないので、
-  未使用容量に残ったゴミの影響を受けない。
-- inline 表現を「未使用バイトは必ずゼロ」という正規形に保ち、
-  `[usize; 2]` としてまるごと比較する。比較は最速になるが、
-  正規形を崩しうる経路 (`truncate` などの後) すべてで正規化が必要になる。
+### 案2: inline 表現の正規形 + ワード比較
+
+inline バッファの「使っていないバイトは必ずゼロ」を不変条件にすれば、
+2 つの inline `Repr` は `[usize; 2]` として丸ごと比較できる。長さはタグバイトに
+含まれているので、長さの復元も比較も要らない。
+
+```rust
+if self.last_byte() < HeapMarker && other.last_byte() < HeapMarker {
+    let this  = unsafe { ptr::read(self  as *const Self as *const [usize; 2]) };
+    let other = unsafe { ptr::read(other as *const Self as *const [usize; 2]) };
+    this == other
+} else {
+    self.content_eq(other)
+}
+```
+
+**現行の LE 64-bit の `InlineBuffer::new` (src/repr/inline_buffer.rs:21-70) は、
+すでに正規形を作っている**。各 arm を追うと:
+
+| arm | 第 1 ワード | 第 2 ワード |
+| --- | --- | --- |
+| `len == 16` | データ 8 バイト | データ 8 バイト (余りなし) |
+| `len >= 8` | データ 8 バイト | `(tail >> ((16 - len) * 8)) \| tag` — 上位がゼロ埋め |
+| `len >= 4` | `head \| (tail << ((len - 4) * 8))` — 上位はゼロ | `tag` のみ |
+| `len >= 2` | 同上 (u16 版) | `tag` のみ |
+| `len == 1` | `*src as u64` — 上位はゼロ | `tag` のみ |
+| `len == 0` | `0` | `tag` のみ |
+
+非 LE のフォールバックも `[0u8; 16]` から始まるので正規形。`InlineBuffer::empty()` と
+`Repr::new_with` の inline arm も同じ。
+
+正規形を崩すのは `InlineBuffer::set_len` (inline_buffer.rs:133-139) だけで、
+これは**バイト 15 しか書き換えないので、縮めたときに古いバイトが残る**。
+縮める経路は `truncate_unchecked` / `pop` / `remove` / `retain` / `clear` で、
+いずれも `impl Repr<Mutable>` にある。
+
+ここが効く。**`Repr<Immutable>` には変更 API が一切無い**ので、非正規形の inline バッファが
+`LeanStr` に届く経路は `Repr::<Mutable>::into_immutable` の非 heap 早期 return
+(repr.rs:904-910、`mem::transmute` でそのまま渡す) だけ。そこで 1 回正規化すれば、
+`LeanStr` 同士の比較にはこの案をそのまま適用できる。
+
+`char_str` の `charlie/canonical-inline-equality` ブランチが同じ設計で、
+`InlineBuffer::make_canonical(&mut self, len)` をマスク付きのワード書き込み
+(memset 呼び出しを避ける) で実装し、`make_exact` (lean_string の `into_immutable` 相当) から
+呼んでいる。計測値は残っていない。
+
+`len == 16` のときバイト 15 が文字列の実データになる点は問題にならない。
+有効な UTF-8 の末尾バイトは必ず `0xC0` 未満で `HeapMarker` (0xD0) を下回るため、
+判別子の判定は正しく inline を返す。
+
+### 案3: 短い文字列の `bcmp` 呼び出しを避ける
+
+論理長が `MAX_INLINE_SIZE` 以下のとき、両端からの重ね合わせロードで比較する。
+構築側の `InlineBuffer::new` と同じ手を比較側に使う形。
+
+```rust
+// 概念コード。両辺は同じ長さであることが確定している。
+fn short_content_eq(this: &[u8], other: &[u8]) -> bool { ... }
+```
+
+案2 と違って正規形を要求しないので、heap / static の短い文字列にも、
+`&str` / `String` / `Cow` との比較にも効く。案2 が `LeanStr` 同士の inline に
+限られるのと補完関係にある。
+
+`char_str` には未マージのブランチが 2 本あり、条件の書き方が違う。
+
+- `charlie/inline-string-equality`: 帯ごとの重ね合わせロードを短絡評価 (`&&`) で繋ぐ。
+  `content_eq_str(&self, other: &str)` も足して、`PartialEq<str/&str/String/Cow>` の
+  すべてを通している。lean_string の `PartialEq` は 20 impl あるので、
+  同型同士だけ直すと取りこぼしが大きいという指摘は同じく当てはまる。
+- `charlie/inline-equality`: 先頭と末尾のワードを XOR して `(head | tail) == 0` を
+  見る形。分岐が 1 つになる。
+
+どちらも計測値は残っていない。2 本に分かれているということは、
+どちらが速いか決着していないと読むのが自然。
 
 ## 5. 判断材料の整理
 
-- 現状の比較は codegen としては十分に良く、削れる無駄は無い。
-- 近道が効くのは heap / static のハンドルが同じバッファを指す場合だけ。
-  16 バイト以下は inline なので、短い文字列のワークロードでは一切効かない。
-- 近道を既定の `==` に入れると、「もっとも速い不一致ケース」に 1 比較ぶんの
-  コストが乗る。`char_str` の計測ではその劣化は 0.1〜0.2 ns 程度。
-- 一方で、共有ハンドル同士の比較が支配的なワークロードでは効果が大きい (長い文字列で顕著)。
-- 呼び出し側が自分で近道を書くには「ポインタと長さが一致すれば同一の内容である」という
-  保証が要るが、これは現在どこにも文書化されていない。
+| | 効く相手 | inline 同士への影響 | 追加の不変条件 | 実装量 |
+| --- | --- | --- | --- | --- |
+| 案1 ポインタ近道 | 共有された heap / static | 1 比較ぶん遅くなる | なし | 小 |
+| 案2 正規形 + ワード比較 | inline 同士 (まず `LeanStr`) | 最速 | `into_immutable` で正規化 | 中 |
+| 案3 短い文字列の直接比較 | 16 バイト以下すべて | 速くなる | なし | 中 |
 
-つまり争点は速度そのものより「既定の `==` の実行時間を予測可能に保つか、
-共有時の最良ケースを取りにいくか」という方針の問題になる。
-選択肢と推奨は [plans/07](../plans/07-equality-policy.md) に書いた。
+- 案1 だけを見ると「既定の `==` の実行時間を予測可能に保つか、共有時の最良ケースを
+  取りにいくか」という方針の問題になり、判断が難しい。
+- 案3 は追加の不変条件が無く、効く範囲がいちばん広い。`bcmp` の呼び出しが消えることは
+  asm で確定できるので、判断が早い。
+- 案2 は `LeanStr` に限れば `into_immutable` の 1 か所を触るだけで済み、
+  文字列 interning や AST のシンボル比較のような、`LeanStr` がいちばん使われる場面に効く。
+
+したがって案3 → 案2 → 案1 の順に測るのがよい。詳細は
+[plans/07](../plans/07-equality-policy.md) に書いた。
