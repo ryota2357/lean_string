@@ -117,6 +117,51 @@ impl InlineBuffer {
         Self(buffer)
     }
 
+    #[inline]
+    pub(super) const fn from_char(ch: char) -> Self {
+        const _: () = assert!(MAX_INLINE_SIZE == 2 * size_of::<usize>());
+
+        // Build the buffer as two words in registers. Going through `char::encode_utf8` and
+        // `Self::new` instead would write the bytes to a stack buffer and read them back.
+        //
+        //   w0: [UTF-8 encoding of `ch` (1..=4 bytes)] [0 ...]
+        //   w1: [0 ...] [last byte: `len` tagged as inline]
+
+        let code = ch as u32;
+
+        // Same bit manipulation as `char::encode_utf8`, but byte `i` of the encoding is placed at
+        // bits `8 * i..8 * (i + 1)` instead of being written to memory.
+        let (bytes, len) = if code < 0x80 {
+            (code, 1)
+        } else if code < 0x800 {
+            let b0 = 0xC0 | (code >> 6);
+            let b1 = 0x80 | (code & 0x3F);
+            (b0 | b1 << 8, 2)
+        } else if code < 0x1_0000 {
+            let b0 = 0xE0 | (code >> 12);
+            let b1 = 0x80 | ((code >> 6) & 0x3F);
+            let b2 = 0x80 | (code & 0x3F);
+            (b0 | b1 << 8 | b2 << 16, 3)
+        } else {
+            let b0 = 0xF0 | (code >> 18);
+            let b1 = 0x80 | ((code >> 12) & 0x3F);
+            let b2 = 0x80 | ((code >> 6) & 0x3F);
+            let b3 = 0x80 | (code & 0x3F);
+            (b0 | b1 << 8 | b2 << 16 | b3 << 24, 4)
+        };
+
+        // The encoding is at most 4 bytes, so it fits in `w0` even on 32-bit targets.
+        let w0 = bytes as usize;
+        let w1 = ((len | LastByte::MASK_1100_0000) as usize) << (usize::BITS - 8);
+
+        // `to_le` makes each word's least significant byte come first in memory, which is the
+        // layout above on any endianness. It is a no-op on little-endian targets.
+        //
+        // SAFETY: The first `len` bytes are the valid UTF-8 encoding of `ch`, the last byte
+        // records `len` as an inline length, and the bytes in between are zero.
+        unsafe { mem::transmute([w0.to_le(), w1.to_le()]) }
+    }
+
     pub(super) const fn empty() -> Self {
         let mut buffer = [0; MAX_INLINE_SIZE];
         buffer[MAX_INLINE_SIZE - 1] = LastByte::Length00 as u8;

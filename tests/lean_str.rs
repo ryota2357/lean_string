@@ -23,6 +23,30 @@ fn from_char() {
 }
 
 #[test]
+fn from_char_utf8_length_boundaries() {
+    let chars = [
+        '\0',
+        'a',
+        '\u{7F}',
+        '\u{80}',
+        'é',
+        '\u{7FF}',
+        '\u{800}',
+        'あ',
+        '\u{FFFF}',
+        '\u{10000}',
+        '🦀',
+        '\u{10FFFF}',
+    ];
+    for ch in chars {
+        let s = LeanStr::from(ch);
+        assert_eq!(s, String::from(ch));
+        assert_eq!(s.len(), ch.len_utf8());
+        assert!(!s.is_heap_allocated());
+    }
+}
+
+#[test]
 fn from_around_inline_limit() {
     let s = &String::from("0123456789abcdefg");
 

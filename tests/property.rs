@@ -25,6 +25,14 @@ fn create_from_str(input: String) {
 
 #[property_test]
 #[cfg_attr(miri, ignore)]
+fn create_from_char(input: char) {
+    let expected = String::from(input);
+    assert_eq!(LeanString::from(input), expected);
+    assert_eq!(LeanStr::from(input), expected);
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
 fn create_from_utf8_bytes(input: Vec<u8>) {
     let input = input.as_slice();
 

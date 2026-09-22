@@ -89,12 +89,7 @@ impl<M: Mutability> Repr<M> {
 
     #[inline]
     pub(crate) fn from_char(ch: char) -> Self {
-        let inline = unsafe {
-            let mut buffer = [0; 4];
-            let str = ch.encode_utf8(&mut buffer);
-            InlineBuffer::new(str)
-        };
-        Repr::from_inline(inline)
+        Repr::from_inline(InlineBuffer::from_char(ch))
     }
 
     #[inline]
