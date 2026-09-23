@@ -676,6 +676,161 @@ fn repeat_overflow() {
     let _ = s.repeat(usize::MAX);
 }
 
+// Adapted from the Rust standard library tests for `str::to_lowercase`.
+// https://github.com/rust-lang/rust/blob/1.98.1/library/alloctests/tests/str.rs
+#[test]
+fn to_lowercase() {
+    let lower = |s: &str| LeanString::from(s).to_lowercase();
+
+    assert_eq!(lower(""), "");
+    assert_eq!(lower("AÉǅaé "), "aéǆaé ");
+
+    // https://github.com/rust-lang/rust/issues/26035
+    assert_eq!(lower("ΑΣ"), "ας");
+    assert_eq!(lower("Α'Σ"), "α'ς");
+    assert_eq!(lower("Α''Σ"), "α''ς");
+
+    assert_eq!(lower("ΑΣ Α"), "ας α");
+    assert_eq!(lower("Α'Σ Α"), "α'ς α");
+    assert_eq!(lower("Α''Σ Α"), "α''ς α");
+
+    assert_eq!(lower("ΑΣ' Α"), "ας' α");
+    assert_eq!(lower("ΑΣ'' Α"), "ας'' α");
+
+    assert_eq!(lower("Α'Σ' Α"), "α'ς' α");
+    assert_eq!(lower("Α''Σ'' Α"), "α''ς'' α");
+
+    assert_eq!(lower("Α Σ"), "α σ");
+    assert_eq!(lower("Α 'Σ"), "α 'σ");
+    assert_eq!(lower("Α ''Σ"), "α ''σ");
+
+    assert_eq!(lower("Σ"), "σ");
+    assert_eq!(lower("'Σ"), "'σ");
+    assert_eq!(lower("''Σ"), "''σ");
+
+    assert_eq!(lower("ΑΣΑ"), "ασα");
+    assert_eq!(lower("ΑΣ'Α"), "ασ'α");
+    assert_eq!(lower("ΑΣ''Α"), "ασ''α");
+
+    // https://github.com/rust-lang/rust/issues/124714
+    // input lengths around the boundary of the chunk size used by the ascii prefix optimization
+    assert_eq!(lower("abcdefghijklmnoΣ"), "abcdefghijklmnoς");
+    assert_eq!(lower("abcdefghijklmnopΣ"), "abcdefghijklmnopς");
+    assert_eq!(lower("abcdefghijklmnopqΣ"), "abcdefghijklmnopqς");
+
+    // a really long string that has it's lowercase form
+    // even longer. this tests that implementations don't assume
+    // an incorrect upper bound on allocations
+    assert_eq!(lower(&"İ".repeat(512)), "i̇".repeat(512));
+
+    // a really long ascii-only string.
+    // This test that the ascii hot-path
+    // functions correctly
+    assert_eq!(lower(&"A".repeat(511)), "a".repeat(511));
+}
+
+// Adapted from the Rust standard library tests for `str::to_uppercase`.
+// https://github.com/rust-lang/rust/blob/1.98.1/library/alloctests/tests/str.rs
+#[test]
+fn to_uppercase() {
+    let upper = |s: &str| LeanString::from(s).to_uppercase();
+
+    assert_eq!(upper(""), "");
+    assert_eq!(upper("aéǅßẞﬁᾀ"), "AÉǄSSẞFIἈΙ");
+}
+
+#[test]
+fn to_lowercase_final_sigma_after_lowercase_letter() {
+    // 'α' is unchanged by lowercasing, but it still makes the following 'Σ' word-final.
+    assert_eq!(LeanString::from("αΣ").to_lowercase(), "ας");
+}
+
+#[test]
+fn case_conversion_fills_inline_buffer() {
+    let upper = "a".repeat(INLINE_LIMIT - 1) + "A";
+    assert_eq!(LeanString::from(upper.as_str()).to_lowercase(), "a".repeat(INLINE_LIMIT));
+
+    let lower = "A".repeat(INLINE_LIMIT - 1) + "a";
+    assert_eq!(LeanString::from(lower.as_str()).to_uppercase(), "A".repeat(INLINE_LIMIT));
+}
+
+#[test]
+fn case_conversion_without_change_shares_buffer() {
+    let ascii = LeanString::from("already lowercase and heap allocated");
+    let non_ascii = LeanString::from("déjà lowercase and heap allocated");
+    let non_ascii_upper = LeanString::from("DÉJÀ UPPERCASE AND HEAP ALLOCATED");
+    assert!(ascii.is_heap_allocated());
+    assert!(non_ascii.is_heap_allocated());
+    assert!(non_ascii_upper.is_heap_allocated());
+
+    assert_eq!(ascii.to_ascii_lowercase().as_ptr(), ascii.as_ptr());
+    assert_eq!(ascii.to_lowercase().as_ptr(), ascii.as_ptr());
+    assert_eq!(non_ascii.to_ascii_lowercase().as_ptr(), non_ascii.as_ptr());
+    assert_eq!(non_ascii.to_lowercase().as_ptr(), non_ascii.as_ptr());
+    assert_eq!(non_ascii_upper.to_ascii_uppercase().as_ptr(), non_ascii_upper.as_ptr());
+    assert_eq!(non_ascii_upper.to_uppercase().as_ptr(), non_ascii_upper.as_ptr());
+
+    let static_ = LeanString::from_static_str("ALREADY UPPERCASE AND STATIC");
+    assert!(static_.to_ascii_uppercase().as_static_str().is_some());
+    assert!(static_.to_uppercase().as_static_str().is_some());
+}
+
+#[test]
+fn make_ascii_case_without_change_keeps_buffer_shared() {
+    let mut heap = LeanString::from("already lowercase and heap allocated");
+    let cloned = heap.clone();
+    heap.make_ascii_lowercase();
+    assert_eq!(heap.as_ptr(), cloned.as_ptr());
+
+    let mut static_ = LeanString::from_static_str("ALREADY UPPERCASE AND STATIC");
+    static_.make_ascii_uppercase();
+    assert!(static_.as_static_str().is_some());
+}
+
+#[test]
+fn make_ascii_case_inline() {
+    let mut inline = LeanString::from("Grüße, Jürgen");
+    assert!(!inline.is_heap_allocated());
+    inline.make_ascii_uppercase();
+    assert_eq!(inline, "GRüßE, JüRGEN");
+    inline.make_ascii_lowercase();
+    assert_eq!(inline, "grüße, jürgen");
+}
+
+#[test]
+fn make_ascii_case_unique_heap_in_place() {
+    let mut heap = LeanString::from("Mixed Case And Heap Allocated");
+    let ptr = heap.as_ptr();
+    heap.make_ascii_uppercase();
+    assert_eq!(heap, "MIXED CASE AND HEAP ALLOCATED");
+    assert_eq!(heap.as_ptr(), ptr);
+}
+
+#[test]
+fn make_ascii_case_shared_heap_detaches() {
+    let mut heap = LeanString::from("Mixed Case And Heap Allocated");
+    let cloned = heap.clone();
+    heap.make_ascii_lowercase();
+    assert_eq!(heap, "mixed case and heap allocated");
+    assert_eq!(cloned, "Mixed Case And Heap Allocated");
+    assert_ne!(heap.as_ptr(), cloned.as_ptr());
+}
+
+#[test]
+fn make_ascii_case_static() {
+    let mut static_ = LeanString::from_static_str("Mixed Case And Static");
+    static_.make_ascii_uppercase();
+    assert_eq!(static_, "MIXED CASE AND STATIC");
+    assert!(static_.is_heap_allocated());
+
+    // A static string truncated to fit inline becomes inline.
+    let mut static_ = LeanString::from_static_str("Mixed Case And Static");
+    static_.truncate(10);
+    static_.make_ascii_lowercase();
+    assert_eq!(static_, "mixed case");
+    assert!(!static_.is_heap_allocated());
+}
+
 #[test]
 fn truncate_keep_capacity() {
     let mut inline = LeanString::from("abcdef");

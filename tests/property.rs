@@ -286,3 +286,60 @@ fn string_to_lean_string(s: String) {
 fn string_to_lean_str(s: String) {
     prop_assert_eq!(s.to_lean_str(), s);
 }
+
+// Arbitrary `String`s are mostly non-ASCII, so they rarely contain long ASCII runs, which case
+// conversion handles on a separate path. Also mix ASCII letters with non-ASCII chars whose case
+// mapping is special: Σ depends on its context, and the others change the length.
+fn case_conversion_input() -> impl Strategy<Value = String> {
+    prop_oneof![any::<String>(), "([a-zA-Z0-9 ']{0,20}[éÉΣσİıßﬁ\u{212A}]?){0,8}"]
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn to_lowercase(#[strategy = case_conversion_input()] input: String) {
+    prop_assert_eq!(LeanString::from(input.as_str()).to_lowercase(), input.to_lowercase());
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn to_uppercase(#[strategy = case_conversion_input()] input: String) {
+    prop_assert_eq!(LeanString::from(input.as_str()).to_uppercase(), input.to_uppercase());
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn to_ascii_lowercase(#[strategy = case_conversion_input()] input: String) {
+    prop_assert_eq!(
+        LeanString::from(input.as_str()).to_ascii_lowercase(),
+        input.to_ascii_lowercase()
+    );
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn to_ascii_uppercase(#[strategy = case_conversion_input()] input: String) {
+    prop_assert_eq!(
+        LeanString::from(input.as_str()).to_ascii_uppercase(),
+        input.to_ascii_uppercase()
+    );
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn make_ascii_lowercase(#[strategy = case_conversion_input()] input: String) {
+    let mut s = LeanString::from(input.as_str());
+    let cloned = s.clone();
+    s.make_ascii_lowercase();
+    prop_assert_eq!(s, input.to_ascii_lowercase());
+    prop_assert_eq!(cloned, input);
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn make_ascii_uppercase(#[strategy = case_conversion_input()] input: String) {
+    let mut s = LeanString::from(input.as_str());
+    let cloned = s.clone();
+    s.make_ascii_uppercase();
+    prop_assert_eq!(s, input.to_ascii_uppercase());
+    prop_assert_eq!(cloned, input);
+}
