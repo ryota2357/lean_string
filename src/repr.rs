@@ -122,26 +122,32 @@ impl<M: Mutability> Repr<M> {
         value.into_repr()
     }
 
-    /// Creates a `Repr` of exactly `len` bytes whose contents are written by `init`.
-    ///
     /// NOTE: If `init` panics, a heap allocation may leak (which is safe).
     ///
     /// # Safety
     ///
-    /// `init` must initialize all `len` bytes with valid UTF-8.
-    unsafe fn new_with(len: usize, init: impl FnOnce(*mut u8)) -> Result<Self, ReserveError> {
+    /// `init` must initialize all bytes of the slice it is given, which is `len` bytes long, with
+    /// valid UTF-8.
+    unsafe fn new_with(
+        len: usize,
+        init: impl FnOnce(&mut [MaybeUninit<u8>]),
+    ) -> Result<Self, ReserveError> {
         if len <= MAX_INLINE_SIZE {
             let mut buffer = InlineBuffer::empty();
-            init(buffer.as_mut_ptr());
+            // SAFETY: `buffer` holds `MAX_INLINE_SIZE >= len` initialized bytes.
+            let dst = unsafe { slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), len) };
+            init(dst);
             // SAFETY:
-            // - From `#Safety`, `init` initialized `len` bytes with valid UTF-8.
+            // - From `# Safety`, `init` initialized `len` bytes with valid UTF-8.
             // - `len` is less than or equal to `MAX_INLINE_SIZE`.
             unsafe { buffer.set_len(len) };
             Ok(Repr::from_inline(buffer))
         } else {
-            // SAFETY: From `#Safety`, `init` initializes all `len` bytes below.
+            // SAFETY: From `# Safety`, `init` initializes all `len` bytes below.
             let buffer = unsafe { HeapBuffer::<M>::new_uninit(len) }?;
-            init(buffer.ptr().as_ptr());
+            // SAFETY: `buffer` is allocated for `len` bytes.
+            let dst = unsafe { slice::from_raw_parts_mut(buffer.ptr().as_ptr().cast(), len) };
+            init(dst);
             Ok(Repr::from_heap(buffer))
         }
     }
@@ -156,12 +162,7 @@ impl<M: Mutability> Repr<M> {
         // SAFETY: `init` writes all `text.len()` bytes mapped from `text`. The ASCII case mapping
         // maps an ASCII letter to an ASCII letter and leaves any other byte unchanged, so the
         // result is valid UTF-8 like `text`.
-        unsafe {
-            Repr::new_with(text.len(), |dst| {
-                let dst = slice::from_raw_parts_mut(dst.cast::<MaybeUninit<u8>>(), text.len());
-                case::map_ascii(text.as_bytes(), dst, mapping);
-            })
-        }
+        unsafe { Repr::new_with(text.len(), |dst| case::map_ascii(text.as_bytes(), dst, mapping)) }
     }
 
     #[cfg(target_pointer_width = "64")]
