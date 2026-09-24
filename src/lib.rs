@@ -1987,6 +1987,74 @@ impl LeanStr {
         self.0.repeat(n).map(LeanStr)
     }
 
+    /// Returns a copy of this [`LeanStr`] where each character is mapped to its ASCII lower case
+    /// equivalent.
+    ///
+    /// ASCII letters 'A' to 'Z' are mapped to 'a' to 'z', but non-ASCII letters are unchanged.
+    ///
+    /// If `self` has no ASCII upper case letters, this method doesn't allocate and behaves like
+    /// [`LeanStr::clone()`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system is out-of-memory. If you want to handle such a problem manually, use
+    /// [`LeanStr::try_to_ascii_lowercase()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("Grüße, Jürgen ❤");
+    /// assert_eq!(s.to_ascii_lowercase(), "grüße, jürgen ❤");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn to_ascii_lowercase(&self) -> Self {
+        self.try_to_ascii_lowercase().unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanStr::to_ascii_lowercase()`].
+    ///
+    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    #[inline]
+    pub fn try_to_ascii_lowercase(&self) -> Result<Self, ReserveError> {
+        self.0.to_ascii_case(CaseMapping::ToLower).map(LeanStr)
+    }
+
+    /// Returns a copy of this [`LeanStr`] where each character is mapped to its ASCII upper case
+    /// equivalent.
+    ///
+    /// ASCII letters 'a' to 'z' are mapped to 'A' to 'Z', but non-ASCII letters are unchanged.
+    ///
+    /// If `self` has no ASCII lower case letters, this method doesn't allocate and behaves like
+    /// [`LeanStr::clone()`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system is out-of-memory. If you want to handle such a problem manually, use
+    /// [`LeanStr::try_to_ascii_uppercase()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("Grüße, Jürgen ❤");
+    /// assert_eq!(s.to_ascii_uppercase(), "GRüßE, JüRGEN ❤");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn to_ascii_uppercase(&self) -> Self {
+        self.try_to_ascii_uppercase().unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanStr::to_ascii_uppercase()`].
+    ///
+    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    #[inline]
+    pub fn try_to_ascii_uppercase(&self) -> Result<Self, ReserveError> {
+        self.0.to_ascii_case(CaseMapping::ToUpper).map(LeanStr)
+    }
+
     /// Converts the [`LeanStr`] into a [`LeanString`].
     ///
     /// Inline strings and strings created from a `&'static str` are converted at zero cost.
