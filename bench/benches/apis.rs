@@ -236,6 +236,50 @@ fn eq_cloned(c: &mut Criterion) {
     group.finish();
 }
 
+fn case_samples() -> Vec<(String, String)> {
+    let mut samples = Vec::new();
+    for n in [16, 256] {
+        let head_non_ascii = "Éé".to_owned() + &ascii(n - "Éé".len());
+        let non_ascii: String = "АбВгДеЖзИйКлМнОп".chars().cycle().take(n / 2).collect();
+        samples.push((format!("ascii/{n}"), ascii(n)));
+        samples.push((format!("head_non_ascii/{n}"), head_non_ascii));
+        samples.push((format!("non_ascii/{n}"), non_ascii));
+    }
+    samples
+}
+
+// TODO: add `prev` after release 0.8.0
+fn to_lowercase(c: &mut Criterion) {
+    let mut group = c.benchmark_group("to_lowercase");
+    for (name, s) in case_samples() {
+        let uut = black_box(lean_string::LeanString::from(s.as_str()));
+        group.bench_with_input(BenchmarkId::new("current", &name), &name, |b, _| {
+            b.iter(|| uut.to_lowercase())
+        });
+        let std = black_box(s);
+        group.bench_with_input(BenchmarkId::new("std", &name), &name, |b, _| {
+            b.iter(|| std.to_lowercase())
+        });
+    }
+    group.finish();
+}
+
+// TODO: add `prev` after release 0.8.0
+fn to_uppercase(c: &mut Criterion) {
+    let mut group = c.benchmark_group("to_uppercase");
+    for (name, s) in case_samples() {
+        let uut = black_box(lean_string::LeanString::from(s.as_str()));
+        group.bench_with_input(BenchmarkId::new("current", &name), &name, |b, _| {
+            b.iter(|| uut.to_uppercase())
+        });
+        let std = black_box(s);
+        group.bench_with_input(BenchmarkId::new("std", &name), &name, |b, _| {
+            b.iter(|| std.to_uppercase())
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     apis,
     from,
@@ -248,5 +292,7 @@ criterion_group!(
     as_str,
     eq,
     eq_cloned,
+    to_lowercase,
+    to_uppercase,
 );
 criterion_main!(apis);
