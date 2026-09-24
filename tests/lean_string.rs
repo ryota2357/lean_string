@@ -558,6 +558,34 @@ fn retain_f_apply_count() {
         true
     });
     assert_eq!(count, 26);
+
+    // A shared buffer is copied once the first character is rejected; that character must not be
+    // passed to `predicate` again.
+    let mut shared = LeanString::from("abcdefghijklmnopqrstuvwxyz");
+    let _cloned = shared.clone();
+    let mut count = 0;
+    shared.retain(|c| {
+        count += 1;
+        c != 'm'
+    });
+    assert_eq!(count, 26);
+    assert_eq!(shared, "abcdefghijklnopqrstuvwxyz");
+}
+
+#[test]
+fn retain_shared_matches_string() {
+    let text = "αbcdefghijklmnopqrstuvwxyζ";
+    for removed in ['α', 'm', 'ζ'] {
+        let mut expected = String::from(text);
+        expected.retain(|c| c != removed);
+
+        let mut shared = LeanString::from(text);
+        let cloned = shared.clone();
+        shared.retain(|c| c != removed);
+
+        assert_eq!(shared, expected, "removing {removed:?}");
+        assert_eq!(cloned, text, "removing {removed:?}");
+    }
 }
 
 #[test]

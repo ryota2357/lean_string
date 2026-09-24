@@ -859,6 +859,9 @@ impl LeanString {
     ///
     /// If the `predicate` returns `true`, the character is kept, otherwise it is removed.
     ///
+    /// If the `predicate` returns `true` for every character, this method does nothing; in
+    /// particular, it doesn't allocate.
+    ///
     /// # Panics
     ///
     /// Panics if the system is out-of-memory when cloning the [`LeanString`]. If you want to
@@ -884,6 +887,9 @@ impl LeanString {
     /// Fallible version of [`LeanString::retain()`].
     ///
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    ///
+    /// On error, `self` is left unchanged, but the `predicate` may already have been called on
+    /// the characters up to and including the first one it rejected.
     #[inline]
     pub fn try_retain(&mut self, predicate: impl FnMut(char) -> bool) -> Result<(), ReserveError> {
         self.0.retain(predicate)

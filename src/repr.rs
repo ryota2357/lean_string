@@ -714,7 +714,16 @@ impl Repr<Mutable> {
         &mut self,
         mut predicate: impl FnMut(char) -> bool,
     ) -> Result<(), ReserveError> {
+        // Look for the first character to remove before making the buffer modifiable, so that a
+        // shared or static buffer is kept as it is if nothing is removed.
+        let Some((removed_idx, removed)) =
+            self.as_str().char_indices().find(|&(_, ch)| !predicate(ch))
+        else {
+            return Ok(());
+        };
+
         // We will modify the buffer, we need to make sure it.
+        // This keeps the content, so `removed_idx` still points at `removed`.
         self.ensure_modifiable()?;
 
         struct SetLenOnDrop<'a> {
@@ -724,7 +733,12 @@ impl Repr<Mutable> {
         }
 
         let len = self.len();
-        let mut g = SetLenOnDrop { self_: self, src_idx: 0, dst_idx: 0 };
+        // Resume just after `removed`, which is dropped without calling `predicate` again.
+        let mut g = SetLenOnDrop {
+            self_: self,
+            src_idx: removed_idx + removed.len_utf8(),
+            dst_idx: removed_idx,
+        };
 
         // SAFETY: `ensure_modifiable` guarantees that the buffer is not StaticBuffer and that
         // a heap buffer is unique.
@@ -761,7 +775,8 @@ impl Repr<Mutable> {
             fn drop(&mut self) {
                 // SAFETY:
                 // - `dst_idx <= src_idx`, and `src_idx <= len`, so `dst_idx <= len`.
-                // - `dst_idx` doesn't split a char because it is a sum of `ch_len`.
+                // - `dst_idx` doesn't split a char because it starts at a char boundary and
+                //   advances by `ch_len`.
                 unsafe { self.self_.set_len(self.dst_idx) }
             }
         }
