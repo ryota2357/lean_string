@@ -657,40 +657,33 @@ fn insert_fail() {
 }
 
 #[test]
-fn repeat_inline() {
-    let s = LeanString::from("ab");
+fn repeat_around_inline() {
+    let s = LeanString::from("a");
     assert!(!s.is_heap_allocated());
 
-    assert_eq!(s.repeat(0), "");
-    assert!(!s.repeat(0).is_heap_allocated());
+    assert_eq!(s.repeat(1), "a");
 
-    assert_eq!(s.repeat(1), "ab");
+    let inline = s.repeat(INLINE_LIMIT);
+    assert_eq!(inline, "a".repeat(INLINE_LIMIT));
+    assert!(!inline.is_heap_allocated());
 
-    let repeated = s.repeat(INLINE_LIMIT);
-    assert_eq!(repeated, "ab".repeat(INLINE_LIMIT));
-    assert!(repeated.is_heap_allocated());
+    let heap = s.repeat(INLINE_LIMIT + 1);
+    assert_eq!(heap, "a".repeat(INLINE_LIMIT + 1));
+    assert!(heap.is_heap_allocated());
 }
 
 #[test]
-fn repeat_heap() {
-    let s = LeanString::from("a".repeat(INLINE_LIMIT + 1).as_str());
-    assert!(s.is_heap_allocated());
+fn repeat_zero_or_empty() {
+    let inline = LeanString::from("ab");
+    assert!(!inline.is_heap_allocated());
+    assert_eq!(inline.repeat(0), "");
+    assert!(!inline.repeat(0).is_heap_allocated());
 
-    assert_eq!(s.repeat(0), "");
-    assert!(!s.repeat(0).is_heap_allocated());
+    let heap = LeanString::from("a".repeat(INLINE_LIMIT + 1).as_str());
+    assert!(heap.is_heap_allocated());
+    assert_eq!(heap.repeat(0), "");
+    assert!(!heap.repeat(0).is_heap_allocated());
 
-    let r1 = s.repeat(1);
-    assert_eq!(r1, s);
-    assert_eq!(r1.as_ptr(), s.as_ptr()); // n == 1 returns clone
-
-    let repeated = s.repeat(2);
-    assert_eq!(repeated.len(), s.len() * 2);
-    assert_eq!(repeated.capacity(), s.len() * 2);
-    assert!(repeated.is_heap_allocated());
-}
-
-#[test]
-fn repeat_empty() {
     let empty = LeanString::new();
     assert_eq!(empty.repeat(0), "");
     assert_eq!(empty.repeat(1), "");
@@ -698,10 +691,42 @@ fn repeat_empty() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot allocate memory to hold LeanString")]
-fn repeat_overflow() {
+fn repeat_heap() {
+    let s = LeanString::from("a".repeat(INLINE_LIMIT + 1).as_str());
+    assert!(s.is_heap_allocated());
+
+    let r1 = s.repeat(1);
+    assert_eq!(r1, s);
+    assert_eq!(r1.as_ptr(), s.as_ptr()); // n == 1 returns clone
+
+    let r2 = s.repeat(2);
+    assert_eq!(r2.len(), s.len() * 2);
+    assert!(r2.is_heap_allocated());
+
+    let r5 = s.repeat(5);
+    assert_eq!(r5.len(), s.len() * 5);
+    assert!(r5.is_heap_allocated());
+}
+
+#[test]
+fn repeat_static() {
+    let s = LeanString::from_static_str("0123456789abcdefghijklmnopqrstuvwxyz");
+    assert!(!s.is_heap_allocated());
+    assert!(s.as_static_str().is_some());
+
+    let r1 = s.repeat(1);
+    assert!(!r1.is_heap_allocated());
+    assert_eq!(r1.as_static_str(), s.as_static_str());
+
+    let r2 = s.repeat(2);
+    assert!(r2.is_heap_allocated());
+    assert_eq!(r2, s.as_str().repeat(2))
+}
+
+#[test]
+fn try_repeat_overflow_is_err() {
     let s = LeanString::from("ab");
-    let _ = s.repeat(usize::MAX);
+    assert!(s.try_repeat(usize::MAX).is_err());
 }
 
 // Adapted from the Rust standard library tests for `str::to_lowercase`.

@@ -1950,6 +1950,43 @@ impl LeanStr {
         self.0.as_static_str()
     }
 
+    /// Creates a new [`LeanStr`] by repeating `self` `n` times.
+    ///
+    /// # Panics
+    ///
+    /// Panics if **any** of the following conditions is met:
+    ///
+    /// 1. The resulting length would overflow (`self.len() * n` exceeds `usize::MAX`).
+    /// 2. The system is out-of-memory.
+    /// 3. On 64-bit architecture, the resulting length is greater than `2^56 - 1`.
+    ///    On 32-bit architecture, it is `2^31 - 12`.
+    ///
+    /// If you want to handle such a problem manually, use [`LeanStr::try_repeat()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanStr;
+    /// let s = LeanStr::from("abc");
+    /// assert_eq!(s.repeat(4), "abcabcabcabc");
+    /// assert_eq!(s.repeat(0), "");
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn repeat(&self, n: usize) -> Self {
+        self.try_repeat(n).unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanStr::repeat()`].
+    ///
+    /// This method won't panic, but returns a [`ReserveError`] if the length would overflow,
+    /// the system is out-of-memory, or the resulting length exceeds the maximum. Otherwise it
+    /// behaves the same as [`LeanStr::repeat()`].
+    #[inline]
+    pub fn try_repeat(&self, n: usize) -> Result<Self, ReserveError> {
+        self.0.repeat(n).map(LeanStr)
+    }
+
     /// Converts the [`LeanStr`] into a [`LeanString`].
     ///
     /// Inline strings and strings created from a `&'static str` are converted at zero cost.

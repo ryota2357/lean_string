@@ -287,6 +287,14 @@ fn string_to_lean_str(s: String) {
     prop_assert_eq!(s.to_lean_str(), s);
 }
 
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn repeat(#[strategy = ".{0,1000}"] input: String, #[strategy = 0..1000usize] n: usize) {
+    let expected = input.repeat(n);
+    prop_assert_eq!(LeanString::from(input.as_str()).repeat(n), expected.as_str());
+    prop_assert_eq!(LeanStr::from(input.as_str()).repeat(n), expected.as_str());
+}
+
 // Arbitrary `String`s are mostly non-ASCII, so they rarely contain long ASCII runs, which case
 // conversion handles on a separate path. Also mix ASCII letters with non-ASCII chars whose case
 // mapping is special: Σ depends on its context, and the others change the length.
