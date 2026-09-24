@@ -789,12 +789,12 @@ fn make_ascii_case_without_change_keeps_buffer_shared() {
 
 #[test]
 fn make_ascii_case_inline() {
-    let mut inline = LeanString::from("Grüße, Jürgen");
+    let mut inline = LeanString::from("Grüße");
     assert!(!inline.is_heap_allocated());
     inline.make_ascii_uppercase();
-    assert_eq!(inline, "GRüßE, JüRGEN");
+    assert_eq!(inline, "GRüßE");
     inline.make_ascii_lowercase();
-    assert_eq!(inline, "grüße, jürgen");
+    assert_eq!(inline, "grüße");
 }
 
 #[test]
@@ -825,9 +825,9 @@ fn make_ascii_case_static() {
 
     // A static string truncated to fit inline becomes inline.
     let mut static_ = LeanString::from_static_str("Mixed Case And Static");
-    static_.truncate(10);
+    static_.truncate(5);
     static_.make_ascii_lowercase();
-    assert_eq!(static_, "mixed case");
+    assert_eq!(static_, "mixed");
     assert!(!static_.is_heap_allocated());
 }
 
