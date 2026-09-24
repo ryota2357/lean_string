@@ -153,6 +153,34 @@ impl<M: Mutability> Repr<M> {
     }
 
     #[inline]
+    pub(crate) fn repeat(&self, n: usize) -> Result<Self, ReserveError> {
+        if n == 1 {
+            return Ok(self.make_shallow_clone());
+        }
+
+        let text = self.as_bytes();
+        let len = text.len().checked_mul(n).ok_or(ReserveError)?;
+
+        // SAFETY: `init` fills all `len` bytes with `n` copies of `text`, and a concatenation of
+        // valid UTF-8 is valid UTF-8.
+        unsafe {
+            Repr::new_with(len, |dst| {
+                for (d, &b) in dst.iter_mut().zip(text) {
+                    d.write(b);
+                }
+                // O(log n) copies
+                let mut filled = text.len();
+                while filled < len {
+                    let (src, rest) = dst.split_at_mut(filled);
+                    let count = filled.min(rest.len());
+                    rest[..count].copy_from_slice(&src[..count]);
+                    filled += count;
+                }
+            })
+        }
+    }
+
+    #[inline]
     pub(crate) fn to_ascii_case(&self, mapping: CaseMapping) -> Result<Self, ReserveError> {
         let text = self.as_str();
         if !case::changes_ascii(text.as_bytes(), mapping) {

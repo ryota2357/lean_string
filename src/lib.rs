@@ -1015,18 +1015,7 @@ impl LeanString {
     /// behaves the same as [`LeanString::repeat()`].
     #[inline]
     pub fn try_repeat(&self, n: usize) -> Result<Self, ReserveError> {
-        if n == 0 || self.is_empty() {
-            Ok(LeanString::new())
-        } else if n == 1 {
-            Ok(self.clone())
-        } else {
-            let capacity = self.len().checked_mul(n).ok_or(ReserveError)?;
-            let mut res = LeanString::try_with_capacity(capacity)?;
-            for _ in 0..n {
-                res.try_push_str(self)?;
-            }
-            Ok(res)
-        }
+        self.0.repeat(n).map(LeanString)
     }
 
     /// Returns the lowercase equivalent of this [`LeanString`], as a new [`LeanString`].
