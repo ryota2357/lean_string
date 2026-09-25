@@ -1,14 +1,14 @@
 # 現行コードの codegen 実測
 
-調査日: 2026-09-09 / 対象: `448a538` / rustc 1.94.1, x86-64
+対象: `8bf3fee` / rustc 1.100.0-nightly (2026-09-24), `x86_64-unknown-linux-gnu`
 
-各プランはこの文書で測った asm を出発点にしている。実装後の before/after 比較にも使えるよう、
-引用は加工せずそのまま貼ってある。
+各プランはここで測った asm を前提にしている。実装後に before/after を比べられるよう、
+asm は手を加えずに載せている (ラベルの番号はビルドごとに変わる)。
 
 ## 測定方法
 
-lean_string を path 依存で参照するだけの小さなクレートを作り、確認したい呼び出しを
-`#[unsafe(no_mangle)]` の関数として置いた。
+lean_string を path 依存で使うだけの小さなクレートを作り、確認したい呼び出しを
+`#[unsafe(no_mangle)]` の関数として並べた。
 
 ```toml
 # Cargo.toml
@@ -24,221 +24,211 @@ lto = false
 ```rust
 #[unsafe(no_mangle)]
 pub fn probe_from_str(s: &str) -> LeanString { LeanString::from(s) }
-// push_str / push / from_char / drop / eq / clone / extend / retain / to_lean_string も同様
+// push_str / push / from_char / drop / eq / clone / extend / retain / to_lean_string /
+// into_lean_str / repeat も同様
 ```
 
 ```sh
-cargo rustc --release --lib -- --emit asm -C llvm-args=--x86-asm-syntax=att
+cargo +nightly rustc --release --lib --target x86_64-unknown-linux-gnu \
+    -- --emit asm -C llvm-args=--x86-asm-syntax=att
 ```
 
-LTO を切ってあるのは、下流クレートから見たときに `#[inline]` がどこまで効いているかを
-観察するため。crate 内部の呼び出しがすべて潰れた状態では、関数の大きさが原因の
-インライン化失敗が見えなくなる。以下のダンプは AT&T 構文で、`.cfi_*` と
-`.p2align` は省いてある。
+ホストは aarch64 なので、nightly に入れてある `x86_64-unknown-linux-gnu` の std を使って
+x86-64 の asm を出した (リンクはしないので、x86-64 の実行環境は要らない)。
 
-命令数は各プローブの本体を数えたもの。
+LTO を切っているのは、下流のクレートから呼んだときに `#[inline]` がどこまで効くかを見るため。
+LTO で crate 内の呼び出しがすべてインライン化されると、関数が大きすぎて展開されない、という問題が見えなくなる。
+以下の asm は AT&T 構文で、`.cfi_*` と `.p2align` は省いた。
 
-| プローブ | 命令数 | 一言 |
+命令数は各プローブの本体の命令を数えたもの。
+
+| プローブ | 命令数 | メモ |
 | --- | --- | --- |
-| `probe_from_str` | 82 | inline 経路はレジスタ内で完結。heap 経路に memcpy 呼び出し |
-| `probe_from_char` | 57 | ASCII はレジスタ内。2〜4 バイトはスタック往復が残る |
-| `probe_push_str` | 8 | 本体は展開されず `callq` 1 本 |
+| `probe_from_str` | 82 | inline の経路はレジスタだけで完結。heap の経路に memcpy の呼び出し |
+| `probe_from_char` | 56 | どの分岐もレジスタだけで完結 |
+| `probe_push_str` | 8 | 本体は展開されず `callq` のみ |
 | `probe_push` | 48 | encode_utf8 の展開 + `callq push_str` |
 | `probe_drop_one` | 14 | 16 バイトのスタックコピーが残る |
 | `probe_drop_vec` | 80 | ループ本体は判別子比較 + `lock decq` + cold 呼び出し |
-| `probe_eq` | 33 | 削れる無駄なし |
-| `probe_clone` | 12 | 理想形 |
-| `probe_from_num` | 106 | 末尾で 16 バイトを 8 回のストアに分割 |
-| `probe_retain_true` | 112 | 冒頭で無条件に `ensure_modifiable` |
-| `probe_insert_str` | 131 | `push_str` と同じ判別子の読み直し |
-| `Repr::push_str` (本体) | 106 | 大きすぎて呼び出し側に展開されない |
+| `probe_eq` | 33 | 削るところなし |
+| `probe_clone` | 12 | 削るところなし |
+| `probe_from_num` (`u32`) | 96 | 末尾で 16 バイトを 5 回のストアに分割 |
+| `probe_from_i32` / `probe_from_i64` | 22 / 22 | `into_repr` が展開されず `callq` (本体 138 / 314 命令) |
+| `probe_retain_true` | 29 | 走査だけで終わる。確保も `ensure_modifiable` の呼び出しも無い |
+| `probe_insert_str` | 133 | `push_str` と同じ判別子の読み直し |
+| `probe_into_lean_str` | 201 | `into_exact` の戻り値が sret |
+| `Repr::push_str` (本体) | 108 | 大きく、呼び出し側に展開されない |
 
 ## 1. `LeanString::from(&str)` — inline 経路
 
-inline 経路はスタックを経由せず、両端からの重ね合わせロードで 2 ワードを組み立てて返す。
+inline の経路はスタックを使わず、先頭と末尾からの重なったロードで 2 ワードを組み立てて返す。
 
 ```asm
 probe_from_str:
+	...
 	cmpq	$17, %rdx
-	jae	.LBB14_1              # heap 経路へ
+	jae	.LBB19_1              # heap 経路へ
 	cmpq	$16, %rdx
-	jne	.LBB14_5
+	jne	.LBB19_6
 	movq	(%rsi), %r14          # len == 16
 	movq	8(%rsi), %r12
-	jmp	.LBB14_16
-.LBB14_5:
+	jmp	.LBB19_17
+	...
+.LBB19_6:
 	movq	%rdx, %r12
 	orq	$-64, %r12
 	shlq	$56, %r12             # 長さタグ
 	cmpq	$7, %rdx
-	jbe	.LBB14_6
+	jbe	.LBB19_7
 	movq	(%rsi), %r14          # len >= 8
 	cmpq	$8, %rdx
-	je	.LBB14_16
+	je	.LBB19_17
 	movq	-8(%rsi,%rdx), %rax   # w0 と重なる in-bounds ロード
 	shll	$3, %edx
 	negb	%dl
 	movl	%edx, %ecx
 	shrq	%cl, %rax
 	orq	%rax, %r12
-	jmp	.LBB14_16
+	jmp	.LBB19_17
 	...
-.LBB14_16:
+.LBB19_17:
 	movq	%r14, (%rbx)          # 2 ストアで終わる
 	movq	%r12, 8(%rbx)
 ```
 
-スタックへのストアもゼロ初期化も無く、バッファ用の領域そのものが割り当てられていない。
-x86 の store-to-load forwarding を踏む余地はここには残っていない。
+スタックへのストアもゼロ初期化も無く、バッファの領域すら確保していない。
+x86 の store-to-load forwarding の問題が起きる余地は無い。
 
-heap 経路 (`.LBB14_1`) には可変長の `callq *memcpy@GOTPCREL(%rip)` が残っている。
+heap の経路 (`.LBB19_1`) には可変長の `callq *memcpy@GOTPCREL(%rip)` が残っている。
 
 ```asm
-.LBB14_1:
+.LBB19_1:
 	movq	%rdx, %rax
 	shrq	$56, %rax
-	jne	.LBB14_17             # 長さ上限の超過
+	jne	.LBB19_18             # 長さ上限の超過
 	...
 	callq	*_RNvCs..___rust_alloc@GOTPCREL(%rip)
 	testq	%rax, %rax
-	je	.LBB14_17
+	je	.LBB19_18
+	movq	%r12, %rdx
+	movq	%rax, %r14
 	movq	$1, (%rax)            # 参照カウント
 	movq	%r12, 8(%rax)         # 容量
 	addq	$16, %r14
+	...
 	callq	*memcpy@GOTPCREL(%rip)
 ```
 
-コピーする長さが短いほど call 境界の割合が大きくなるので、inline に収まらない直後の
-長さ帯 (17〜64 バイト) でこの呼び出しがいちばん重く効く。実際 `Construct` ベンチの
-len 25 で `String` に 37% 負けている ([plans/02](../plans/02-medium-copy.md) の表)。
+コピーが短いほど関数呼び出しのコストが相対的に大きくなるので、inline に収まらなくなった直後の
+長さ (17〜64 バイト) でいちばん効いてくる。実際、`Construct` ベンチの len 25 では `String` より
+37% 遅い ([plans/01](../plans/01-medium-copy.md) の表)。
 
-なお `Result<Repr, ReserveError>` の Err arm を呼び出し側で再検査する分岐は
-`assert_unchecked` により消えており、`.LBB14_17` へ飛ぶのは長さ上限超過と確保失敗のときだけ。
+なお、`Result<Repr, ReserveError>` が Err かどうかを呼び出し側で調べ直す分岐は `assert_unchecked` で
+消えている。`.LBB19_18` に飛ぶのは長さの上限を超えたときと確保に失敗したときだけ。
 
 ## 2. `LeanString::from(char)`
 
-ASCII の経路は定数畳み込みが効いて完全にレジスタ内で終わる。
+`InlineBuffer::from_char` が UTF-8 のエンコード結果をレジスタ上で組み立てるので、
+どの分岐もスタックを使わず、2 回のストアで終わる。
 
 ```asm
 probe_from_char:
 	movq	%rdi, %rax
-	movl	$0, -4(%rsp)
 	cmpl	$128, %esi
-	jae	.LBB12_1
-	movl	%esi, %esi
-	movabsq	$-4539628424389459968, %rdx   # 長さ 1 のタグ
-	movq	%rsi, (%rax)
-	movq	%rdx, 8(%rax)
+	jae	.LBB13_2
+	movabsq	$-4539628424389459968, %rcx   # 長さ 1 のタグ
+	movl	%esi, %edx
+	movq	%rdx, (%rax)
+	movq	%rcx, 8(%rax)
 	retq
-```
-
-一方 2〜4 バイトの `char` にはスタック往復が残る。原因は `Repr::from_char` (src/repr.rs:91-98)
-が `char::encode_utf8` でスタック上の 4 バイトバッファに書き、それを `&str` として
-`InlineBuffer::new` に渡していること。
-
-```asm
-.LBB12_5:
-	movb	%dl, (%rsi)           # encode_utf8 の最終バイト
-	leaq	-64(%rcx), %rdx
-	shlq	$56, %rdx
-	movzwl	-4(%rsp), %edi        # ★4 バイトバッファから読み直し
-	movzwl	-6(%rsp,%rcx), %esi
-	addq	$-2, %rcx
-	shll	$3, %ecx
-	shlq	%cl, %rsi
-	orq	%rdi, %rsi
-	movq	%rsi, (%rax)
-	movq	%rdx, 8(%rax)
-	retq
-.LBB12_8:
 	...
-	movb	%sil, -4(%rsp)        # 4 バイトを 1 バイトずつストア
-	movb	%dil, -3(%rsp)
-	movb	%cl, -2(%rsp)
-	movb	%dl, -1(%rsp)
-	movl	-4(%rsp), %esi        # ★4 バイトを 1 回でロード
-	movabsq	$-4323455642275676160, %rdx
-	movq	%rsi, (%rax)
-	movq	%rdx, 8(%rax)
+.LBB13_4:                                 # 4 バイト文字
+	movl	%esi, %ecx
+	shrl	$18, %ecx
+	...
+	addl	$-2139062032, %esi
+	movabsq	$-4323455642275676160, %rcx
+	movl	%esi, %edx
+	movq	%rdx, (%rax)
+	movq	%rcx, 8(%rax)
+	retq
 ```
 
-4 バイト文字の arm では 1 バイトずつのストア 4 本に対して 4 バイトのロードが跨がるため、
-x86 の store-to-load forwarding が成立しない (ロードが単一のストアに完全に含まれる場合にしか
-転送できない)。`char` は最大 4 バイトなので、UTF-8 エンコード結果を u32 として
-レジスタ内で組み立てれば第 1 ワードに直接置ける。
-[plans/01](../plans/01-char-inline-construction.md) の題材。
+ここに直すところは無い。`push(char)` と `Extend<char>` はこの経路を通らず
+`push_str` を呼ぶので、そちらは §4 で見る。
 
 ## 3. `LeanString::push_str`
 
-`Repr::push_str` には `#[inline]` が付いているが、**下流クレートからの呼び出しでは
-インライン化されない**。
+`Repr::push_str` には `#[inline]` が付いているが、下流のクレートから呼ぶと展開されない。
 
 ```asm
 probe_push_str:
-	callq	_ZN11lean_string4repr50Repr$LT$..Mutable$GT$8push_str...E
+	pushq	%rax
+	callq	_RNvMs_NtC..11lean_string4reprINtB4_4ReprNtNtB4_10mutability7MutableE8push_str
 	testb	%al, %al
-	jne	.LBB18_2
+	jne	.LBB24_2
+	popq	%rax
 	retq
 ```
 
-本体は 106 命令ある。`reserve` の判定がすべて展開された結果、インライン化の閾値を
-超えている。本体を追うと以下が見える。
+本体は 108 命令ある。`reserve` の判定がすべて展開されているため、インライン化の閾値を
+超えている。本体は次のとおり。
 
 ```asm
 	testq	%rdx, %rdx            # string.is_empty()
-	je	.LBB3_16
-	movzbl	15(%rdi), %ecx        # ★判別子の 1 回目
-	movabsq	$72057594037927935, %rax
-	andq	8(%rdi), %rax
-	leaq	-192(%rcx), %rdi      # len() の branchless 復元
-	cmpq	$16, %rdi
+	je	.LBB9_1
+	...
+	movzbl	15(%rdi), %edi        # 判別子 (1 回目)
+	movabsq	$72057594037927935, %rcx
+	andq	8(%rbx), %rcx
+	leaq	-192(%rdi), %rax      # len() の branchless 復元
+	cmpq	$16, %rax
 	movl	$16, %r12d
-	cmovbq	%rdi, %r12
-	cmpq	$208, %rcx
-	cmovaeq	%rax, %r12
+	cmovbq	%rax, %r12
+	cmpq	$208, %rdi
+	cmovaeq	%rcx, %r12
 	movq	%r12, %r15
+	movb	$1, %al
 	addq	%rdx, %r15
-	jb	.LBB3_17              # checked_add のオーバーフロー判定
-	cmpl	$208, %ecx            # HeapMarker か
-	jne	.LBB3_7
-	movq	(%rbx), %rcx
-	movq	-16(%rcx), %rcx       # 参照カウントのロード (is_unique)
-	cmpq	$1, %rcx
-	jne	.LBB3_23
-	movq	(%rbx), %rcx
-	cmpq	%r15, -8(%rcx)        # 容量比較
-	jae	.LBB3_9
+	jb	.LBB9_27              # checked_add のオーバーフロー判定
+	cmpl	$208, %edi            # HeapMarker か
+	jne	.LBB9_5
+	movq	(%rbx), %rax
+	movq	-16(%rax), %rax       # 参照カウントのロード (is_unique)
+	cmpq	$1, %rax
+	jne	.LBB9_19
+	movq	(%rbx), %rax
+	cmpq	%r15, -8(%rax)        # 容量比較
+	jae	.LBB9_12
 	...                           # 足りなければ outline された reserve へ
-.LBB3_9:
-	cmpb	$-48, 15(%rbx)        # ★判別子の 2 回目 (as_mut_ptr)
+.LBB9_12:
+	cmpb	$-48, 15(%rbx)        # 判別子 (2 回目、as_mut_ptr)
 	movq	%rbx, %rdi
-	jne	.LBB3_11
+	jne	.LBB9_14
 	movq	(%rbx), %rdi
-.LBB3_11:
+.LBB9_14:
 	addq	%r12, %rdi
-	callq	*memcpy@GOTPCREL(%rip)  # ★可変長 memcpy の呼び出し
-	movzbl	15(%rbx), %eax        # ★判別子の 3 回目 (set_len)
+	callq	*memcpy@GOTPCREL(%rip)  # 可変長 memcpy の呼び出し
+	movzbl	15(%rbx), %eax        # 判別子 (3 回目、set_len)
 	cmpl	$208, %eax
-	je	.LBB3_14
-	cmpl	$209, %eax            # ★到達しない StaticMarker の比較
-	jne	.LBB3_18
+	je	.LBB9_28
+	cmpl	$209, %eax            # 常に偽になる StaticMarker との比較
+	jne	.LBB9_24
 ```
 
-判定そのものは `reserve` を丸ごと呼ぶ形にしては十分に畳まれているが、次の 4 点が残る。
+判定の部分は、`reserve` をそのまま呼んでいる割にはよくまとまっている。ただ次の 4 点が残っている。
 
-1. 判別子の読み直しが 3 回ある (fast path の判定 → `as_mut_ptr` → `set_len`)。
-   `push_str` は判定の時点でバッファ種別を知っているのに、それを後段へ伝える手段がない。
-2. `set_len` の `cmpl $209` は StaticMarker との比較だが、`reserve` が `Ok` を返した後は
-   static ではありえないので死んだ比較になっている。
-3. 追記のコピーが常に可変長 memcpy の呼び出しになる。inline バッファへの数バイトの
-   追記でも call 境界を跨ぐ。
-4. 関数全体が大きいため呼び出し側でインライン化されない。
+1. 判別子を 3 回読んでいる (fast path の判定、`as_mut_ptr`、`set_len`)。
+   最初の判定でバッファの種類は分かっているのに、それを後ろに伝える手段がない。
+2. `set_len` の `cmpl $209` は StaticMarker との比較だが、`reserve` が `Ok` を返した後に
+   static であることはないので、この比較は常に偽になる。
+3. 追記のコピーが常に可変長の memcpy の呼び出しになる。inline バッファに数バイト追記するだけでも関数を呼ぶ。
+4. 関数全体が大きいので、呼び出し側に展開されない。
 
-1・2・4 は [plans/03](../plans/03-push-str-fast-path.md)、3 は
-[plans/02](../plans/02-medium-copy.md) で扱う。
+1・2・4 は [plans/02](../plans/02-push-str-fast-path.md)、3 は
+[plans/01](../plans/01-medium-copy.md) で扱う。
 
-`LeanString::insert_str` (131 命令) も同じ形で、`memmove` と `memcpy` の 2 回の呼び出しと
-判別子の 3 回読みを持つ。
+`LeanString::insert_str` (133 命令) も同じ作りで、`memmove` と `memcpy` を 1 回ずつ呼び、判別子を 3 回読んでいる。
 
 ## 4. `LeanString::push(char)` と `Extend<char>`
 
@@ -247,80 +237,83 @@ probe_push_str:
 ```asm
 probe_push:
 	...                          # encode_utf8 相当の分岐 (4 通り)
-.LBB17_6:
-	leaq	4(%rsp), %rsi
-	callq	_ZN11lean_string4repr50Repr$LT$..Mutable$GT$8push_str...E
+	callq	_RNvMs_NtC..11lean_string4reprINtB4_4ReprNtNtB4_10mutability7MutableE8push_str
+	testb	%al, %al
+	jne	.LBB23_9
+	popq	%rax
+	retq
 ```
 
 `Extend<char>` はこれを 1 文字ごとに繰り返す。ループ本体は次の形。
 
 ```asm
-.LBB10_24:
+.LBB14_24:
 	movb	%al, (%rsp)           # ASCII のエンコード
 	movl	$1, %edx
-.LBB10_21:
+.LBB14_21:
 	movq	%r14, %rdi
 	movq	%r15, %rsi
-	callq	_ZN11lean_string4repr50Repr$LT$..Mutable$GT$8push_str...E
+	callq	_RNvMs_NtC..11lean_string4reprINtB4_4ReprNtNtB4_10mutability7MutableE8push_str
 	testb	%al, %al
-	jne	.LBB10_22
-.LBB10_14:
+	jne	.LBB14_22
+.LBB14_14:
 	movq	%rbx, %rdi
 	callq	*%r12                 # iterator の next()
-	cmpl	$1114112, %eax
+	cmpl	$-1, %eax
+	je	.LBB14_23
 ```
 
-つまり 1 文字あたり「関数呼び出し + 長さ復元 + オーバーフロー判定 + 判別子分岐 +
-参照カウントのロード + 容量比較 + 1〜4 バイトのための memcpy 呼び出し + set_len の
-判別子分岐」を通る。バッファを一度だけ解決してループ内ではポインタと長さだけを進める
-形にできる。[plans/04](../plans/04-append-writer.md) の題材。
+つまり 1 文字ごとに、関数呼び出し、長さの復元、オーバーフローの判定、判別子による分岐、
+参照カウントのロード、容量の比較、1〜4 バイトのための memcpy の呼び出し、`set_len` での判別子による分岐を通る。
+書き込み先は最初に 1 回決めればよく、ループの中ではポインタと長さを進めるだけにできる。
+[plans/03](../plans/03-append-writer.md) で扱う。
 
-`FromIterator<char>` (`probe_collect_chars`) も同じ形で、冒頭で `size_hint().0` 分の
-容量を確保したあとは 1 文字ずつ `push_str` を呼ぶ。
+`FromIterator<char>` も同じで、最初に `size_hint().0` の容量を確保した後は 1 文字ずつ `push_str` を呼ぶ。
+`to_lowercase` / `to_uppercase` の非 ASCII の部分も `c.to_lowercase().for_each(|l| mapped.push(l))` なので同じ経路を通る。
 
 ## 5. Drop
 
-`Vec<LeanString>` の drop glue は良い形になっている。
+`Vec<LeanString>` の drop はよいコードになっている。
 
 ```asm
-.LBB8_2:                              # probe_drop_vec のループ本体
-	cmpb	$-48, 15(%r14,%r15)
-	jne	.LBB8_5
+                                      # probe_drop_vec のループ本体
 	leaq	(%r14,%r15), %rdi
 	movq	(%rdi), %rax
 	lock		decq	-16(%rax)
-	jne	.LBB8_5
-	callq	_ZN11lean_string4repr11heap_buffer19HeapBuffer$LT$H$GT$7release17on_last_reference...E
+	jne	.LBB12_5
+	callq	_RINvNvMs2_NtNtC..11lean_string4repr11heap_bufferINtB8_10HeapBufferpE7release17on_last_reference...
+	jmp	.LBB12_5
 ```
 
-一方、単発の drop には 16 バイトのスタックコピーが残っている。
+一方、1 つだけ drop するときは 16 バイトをスタックにコピーしている。
 
 ```asm
 probe_drop_one:
 	subq	$24, %rsp
-	movups	(%rdi), %xmm0         # ★引数を丸ごとスタックへ実体化
+	movups	(%rdi), %xmm0         # 引数をまるごとスタックへコピー
 	movaps	%xmm0, (%rsp)
 	cmpb	$-48, 15(%rsp)
-	jne	.LBB7_3
+	jne	.LBB11_3
 	movq	(%rsp), %rax
 	lock		decq	-16(%rax)
-	je	.LBB7_2
-.LBB7_3:
+	je	.LBB11_2
+.LBB11_3:
 	addq	$24, %rsp
 	retq
-.LBB7_2:
-	movq	%rsp, %rdi            # ★cold 側へ「アドレス」を渡す
-	callq	_ZN11lean_string4repr11heap_buffer19HeapBuffer$LT$H$GT$7release17on_last_reference...E
+.LBB11_2:
+	movq	%rsp, %rdi            # cold 側にはアドレスを渡している
+	callq	_RINvNvMs2_NtNtC..11lean_string4repr11heap_bufferINtB8_10HeapBufferpE7release17on_last_reference...
+	addq	$24, %rsp
+	retq
 ```
 
-`HeapBuffer::release` (src/repr/heap_buffer.rs:211-227) は最終参照時の処理を
-`#[cold] fn on_last_reference(this: &mut HeapBuffer<H>)` に outline しているが、
-参照を渡すために値のアドレスが必要になり、by-value で受け取った引数がスタックに
-実体化されている。`HeapBuffer` は 2 ワードなので値渡しにでき、そうすればこのコピーは
-不要になる。[plans/05](../plans/05-drop-cold-abi.md) で扱う。
+`HeapBuffer::release` (src/repr/heap_buffer.rs) は最後の参照が消えるときの処理を
+`#[cold] fn on_last_reference(this: &mut HeapBuffer<H>)` に切り出しているが、参照を渡すには
+値のアドレスが必要なので、値で受け取った引数をスタックに置くことになる。`HeapBuffer` は 2 ワードなので
+値で渡せば、このコピーは要らなくなる。[plans/04](../plans/04-drop-cold-abi.md) で扱う。
 
-`on_last_reference` と `make_shallow_clone::ref_count_overflow` は
-どちらも `.text.unlikely` に配置されており、cold 化そのものは効いている。
+`on_last_reference` と `make_shallow_clone::ref_count_overflow` はどちらも `.text.unlikely` に置かれており、
+cold 指定自体は効いている。
 
 ## 6. 比較
 
@@ -338,98 +331,119 @@ probe_eq:
 	cmovaeq	%rcx, %rdx
 	...                           # 右辺も同様
 	cmpq	%r9, %rdx             # len 比較
-	jne	.LBB9_1
-	movq	(%rdi), %r8
+	jne	.LBB13_1
 	cmpb	$-48, %cl
-	jb	.LBB9_4
-	movq	(%rsi), %rsi
-.LBB9_4:
+	jb	.LBB13_4
+	movq	(%rsi), %rsi          # データポインタの選択
+.LBB13_4:
 	cmpb	$-48, %al
-	cmovaeq	%r8, %rdi
+	jb	.LBB13_6
+	movq	(%rdi), %rdi
+.LBB13_6:
+	pushq	%rax
 	callq	*bcmp@GOTPCREL(%rip)
 ```
 
-「両辺の len を branchless に復元 → len 比較 → データポインタを cmov で選択 → `bcmp`」で、
-無駄な分岐や再読み込みはない。ポインタ一致の fast path は入っていない。
-これを入れるかどうかは [research/equality.md](./equality.md) と
-[plans/07](../plans/07-equality-policy.md) で検討する。
+両辺の長さを分岐なしで復元し、長さを比べ、データポインタを選んで `bcmp` を呼ぶ。
+余計な分岐や読み直しは無い。ポインタが同じなら内容を見ずに済ませる近道は入っていない。
+入れるかどうかは [research/equality.md](./equality.md) と [plans/05](../plans/05-equality-policy.md) で検討する。
 
 ## 7. Clone
 
 ```asm
 probe_clone:
 	cmpb	$-48, 15(%rsi)
-	jne	.LBB5_2
+	jne	.LBB10_2
 	movq	(%rsi), %rax
 	lock		incq	-16(%rax)
-	jle	.LBB5_3
-.LBB5_2:
+	jle	.LBB10_3
+.LBB10_2:
 	movups	(%rsi), %xmm0
 	movups	%xmm0, (%rdi)
 	movq	%rdi, %rax
 	retq
 ```
 
-12 命令。heap の arm は判別子の比較と `lock incq` の 2 命令で、どちらの arm も
-16 バイトのビット単位コピーへ合流する。オーバーフロー処理は `.text.unlikely` にある。
-削るところはない。
+12 命令。heap の分岐は判別子の比較と `lock incq` の 2 命令で、どちらの分岐も 16 バイトのコピーに合流する。
+オーバーフローの処理は `.text.unlikely` にある。削るところは無い。
 
 ## 8. 整数の変換
 
-`Repr::from_num` は LUT で桁を作り、`Repr::new_with` (src/repr.rs:136-151) の
-`init` クロージャからスタック上の 16 バイトバッファへ直接書く。桁を作る部分は良いが、
-**戻り値を作る最後の 16 バイト転送が 8 回のストアに分割される**。
+`Repr::from_num` は LUT で桁を作り、`Repr::new_with` の `init` クロージャからスタック上の
+16 バイトのバッファに直接書く。
+
+`u32` (`probe_from_num`) では `into_repr` がすべて展開され、heap の経路も消えている
+(10 桁は必ず inline に収まることを、LLVM が桁数の計算から導いている)。
+桁を作る部分はよいが、最後に 16 バイトの戻り値を書き出すところが 5 回のストアに分かれている。
 
 ```asm
-.LBB13_17:
+.LBB14_17:
 	orb	$-64, %cl
 	movb	%cl, -1(%rsp)         # set_len (バイト 15)
-	movq	-16(%rsp), %rcx       # ワード単位で 2 回ロード
-	movq	-8(%rsp), %rdx
-	movq	%rcx, %rsi
-	shrq	$8, %rsi
-	movq	%rdx, %rdi
-	shrq	$56, %rdi
-	movb	%cl, (%rax)           # ★ここから 16 バイトを 8 回に分けてストア
-	movq	%rcx, %r8
-	shrq	$56, %r8
-	movb	%r8b, 7(%rax)
-	shrq	$40, %rcx
-	movw	%cx, 5(%rax)
-	movl	%esi, 1(%rax)
-	movl	%edx, 8(%rax)
-	movq	%rdx, %rcx
-	shrq	$48, %rcx
+	movq	-16(%rsp), %rcx
+	movq	%rcx, (%rax)          # ここから 16 バイトを 5 回に分けて書く
+	movl	-8(%rsp), %ecx
+	movl	%ecx, 8(%rax)
+	movzwl	-4(%rsp), %ecx
+	movw	%cx, 12(%rax)
+	movzbl	-2(%rsp), %ecx
 	movb	%cl, 14(%rax)
-	shrq	$32, %rdx
-	movw	%dx, 12(%rax)
-	movb	%dil, 15(%rax)
+	movzbl	-1(%rsp), %ecx
+	movb	%cl, 15(%rax)
 ```
 
-ロード自体は 2 本にまとまっているので、分割されているのはストア側だけである。
-§1 の `from_str` が同じ `Repr` へ `movq` 2 本で書けていることと対照的で、
-違いは値の出どころにある。`from_str` は 2 つの u64 を計算して持っているのに対し、
-`new_with` の値はバイト単位のストアで作られたバッファから来るため、LLVM が
-`Repr` のフィールド境界 (バイト 8 と 15) ごとに分解したまま再合成できていない。
+§1 の `from_str` は同じ `Repr` を `movq` 2 本で書けている。違いは値の出どころで、
+`from_str` は 2 つの u64 をレジスタで計算しているのに対し、`new_with` の値はバイト単位で書いたバッファから来る。
+そのため LLVM が `Repr` のフィールドの境界 (バイト 8・12・14・15) で分けたまま、まとめ直せていない。
+また桁は 2 バイト単位のストア (`movw %dx, -18(%rsp,%rsi)`) で書かれ、直後の
+`movq -16(%rsp)` がそれらを跨いで読むので、x86 では store-to-load forwarding が成立しない。
 
-素直な対処 (`new_with` の inline arm を `InlineBuffer::new` 経由にする) を試したところ、
-`into_repr` が大きくなって下流からインライン化されなくなり、**全体としては悪化した**
-(106 命令のインライン展開 → 22 命令 + `callq into_repr`)。
-詳細と別案は [plans/11](../plans/11-integer-codegen.md) に書いた。
+符号付きの `i32` / `i64` では、`into_repr` 自体が下流で展開されない。
+
+```asm
+probe_from_i32:
+	...
+	callq	_RINvXsg_NtNtC..11lean_string4repr11num_to_reprlNtB6_9NumToRepr9into_repr...
+```
+
+`into_repr` の本体は `i32` で 138 命令、`i64` で 314 命令。`impl_NumToRepr_for_integers` が
+作る `into_repr` には `#[inline]` が付いていないが、付けても結果は変わらなかった
+(generic なので MIR はもともと下流に出ている。大きさが閾値を超えているのが原因)。
+`u64` は展開される (`probe_from_u64` は 217 命令)。
+
+詳しくは [plans/08](../plans/08-integer-codegen.md) に書いた。
 
 ## 9. `retain`
 
-`Repr::retain` (src/repr.rs:664-721) は本体に入る前に無条件で `ensure_modifiable` を呼ぶ。
+`Repr::retain` は、最初に削る文字が見つかるまでバッファを共有したまま走査する。
+`retain(|_| true)` は走査だけで終わり、確保も `ensure_modifiable` の呼び出しも無い。
 
 ```asm
 probe_retain_true:
-	movq	%rdi, %rbx
-	callq	*_ZN11lean_string4repr50Repr$LT$..Mutable$GT$17ensure_modifiable...E
-	testb	%al, %al
-	jne	.LBB19_25
-	movzbl	15(%rbx), %eax
+	movzbl	15(%rdi), %ecx
+	...                           # len とデータポインタの復元
+.LBB26_4:
+	movzbl	(%rdi), %ecx          # UTF-8 の先頭バイトから文字幅だけ進める
+	testb	%cl, %cl
+	jns	.LBB26_5
 	...
+.LBB26_10:
+	retq
 ```
 
-述語が 1 文字も落とさない場合でも共有バッファのコピーが発生する。
-[plans/06](../plans/06-retain-shared-fast-path.md) の題材。
+## 10. `LeanString::into_lean_str`
+
+unique な heap バッファの変換では `HeapBuffer::into_exact` を呼ぶが、その戻り値が sret (隠しポインタ) で返っている。
+
+```asm
+	movq	16(%rsp), %rsi
+	movq	24(%rsp), %rdx
+	leaq	32(%rsp), %rdi        # sret のポインタ
+	callq	*..HeapBuffer..GrowableHeader..into_exact@GOTPCREL(%rip)
+	movq	8(%rsp), %r12
+	movq	40(%rsp), %r15        # 結果をスタックから読む
+	movq	48(%rsp), %rbp
+	cmpl	$1, 32(%rsp)          # 判別子もスタックから
+```
+
+戻り値の型 `Result<HeapBuffer<ExactHeader>, (HeapBuffer<GrowableHeader>, ReserveError)>` が 24 バイトになるため。[plans/09](../plans/09-mutability-conversion.md) で扱う。
