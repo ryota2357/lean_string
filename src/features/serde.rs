@@ -45,7 +45,7 @@ impl<'de> Deserialize<'de> for LeanString {
             }
         }
 
-        deserializer.deserialize_string(LeanStringVisitor)
+        deserializer.deserialize_str(LeanStringVisitor)
     }
 }
 
@@ -87,6 +87,6 @@ impl<'de> Deserialize<'de> for LeanStr {
             }
         }
 
-        deserializer.deserialize_string(LeanStrVisitor)
+        deserializer.deserialize_str(LeanStrVisitor)
     }
 }

@@ -54,6 +54,35 @@ fn new_from_char() {
 }
 
 #[test]
+fn from_char_utf8_length_boundaries() {
+    let chars = [
+        '\0',
+        'a',
+        '\u{7F}',
+        '\u{80}',
+        'é',
+        '\u{7FF}',
+        '\u{800}',
+        'あ',
+        '\u{FFFF}',
+        '\u{10000}',
+        '🦀',
+        '\u{10FFFF}',
+    ];
+    for ch in chars {
+        let expected = String::from(ch);
+        let s = LeanString::from(ch);
+        assert_eq!(s, expected);
+        assert_eq!(s.len(), ch.len_utf8());
+        assert!(!s.is_heap_allocated());
+
+        let mut pushed = s.clone();
+        pushed.push('x');
+        assert_eq!(pushed, expected + "x");
+    }
+}
+
+#[test]
 fn from_around_inline_limit() {
     let s = &String::from("0123456789abcdefg");
 
@@ -529,6 +558,34 @@ fn retain_f_apply_count() {
         true
     });
     assert_eq!(count, 26);
+
+    // A shared buffer is copied once the first character is rejected; that character must not be
+    // passed to `predicate` again.
+    let mut shared = LeanString::from("abcdefghijklmnopqrstuvwxyz");
+    let _cloned = shared.clone();
+    let mut count = 0;
+    shared.retain(|c| {
+        count += 1;
+        c != 'm'
+    });
+    assert_eq!(count, 26);
+    assert_eq!(shared, "abcdefghijklnopqrstuvwxyz");
+}
+
+#[test]
+fn retain_shared_matches_string() {
+    let text = "αbcdefghijklmnopqrstuvwxyζ";
+    for removed in ['α', 'm', 'ζ'] {
+        let mut expected = String::from(text);
+        expected.retain(|c| c != removed);
+
+        let mut shared = LeanString::from(text);
+        let cloned = shared.clone();
+        shared.retain(|c| c != removed);
+
+        assert_eq!(shared, expected, "removing {removed:?}");
+        assert_eq!(cloned, text, "removing {removed:?}");
+    }
 }
 
 #[test]
@@ -600,40 +657,33 @@ fn insert_fail() {
 }
 
 #[test]
-fn repeat_inline() {
-    let s = LeanString::from("ab");
+fn repeat_around_inline() {
+    let s = LeanString::from("a");
     assert!(!s.is_heap_allocated());
 
-    assert_eq!(s.repeat(0), "");
-    assert!(!s.repeat(0).is_heap_allocated());
+    assert_eq!(s.repeat(1), "a");
 
-    assert_eq!(s.repeat(1), "ab");
+    let inline = s.repeat(INLINE_LIMIT);
+    assert_eq!(inline, "a".repeat(INLINE_LIMIT));
+    assert!(!inline.is_heap_allocated());
 
-    let repeated = s.repeat(INLINE_LIMIT);
-    assert_eq!(repeated, "ab".repeat(INLINE_LIMIT));
-    assert!(repeated.is_heap_allocated());
+    let heap = s.repeat(INLINE_LIMIT + 1);
+    assert_eq!(heap, "a".repeat(INLINE_LIMIT + 1));
+    assert!(heap.is_heap_allocated());
 }
 
 #[test]
-fn repeat_heap() {
-    let s = LeanString::from("a".repeat(INLINE_LIMIT + 1).as_str());
-    assert!(s.is_heap_allocated());
+fn repeat_zero_or_empty() {
+    let inline = LeanString::from("ab");
+    assert!(!inline.is_heap_allocated());
+    assert_eq!(inline.repeat(0), "");
+    assert!(!inline.repeat(0).is_heap_allocated());
 
-    assert_eq!(s.repeat(0), "");
-    assert!(!s.repeat(0).is_heap_allocated());
+    let heap = LeanString::from("a".repeat(INLINE_LIMIT + 1).as_str());
+    assert!(heap.is_heap_allocated());
+    assert_eq!(heap.repeat(0), "");
+    assert!(!heap.repeat(0).is_heap_allocated());
 
-    let r1 = s.repeat(1);
-    assert_eq!(r1, s);
-    assert_eq!(r1.as_ptr(), s.as_ptr()); // n == 1 returns clone
-
-    let repeated = s.repeat(2);
-    assert_eq!(repeated.len(), s.len() * 2);
-    assert_eq!(repeated.capacity(), s.len() * 2);
-    assert!(repeated.is_heap_allocated());
-}
-
-#[test]
-fn repeat_empty() {
     let empty = LeanString::new();
     assert_eq!(empty.repeat(0), "");
     assert_eq!(empty.repeat(1), "");
@@ -641,10 +691,197 @@ fn repeat_empty() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot allocate memory to hold LeanString")]
-fn repeat_overflow() {
+fn repeat_heap() {
+    let s = LeanString::from("a".repeat(INLINE_LIMIT + 1).as_str());
+    assert!(s.is_heap_allocated());
+
+    let r1 = s.repeat(1);
+    assert_eq!(r1, s);
+    assert_eq!(r1.as_ptr(), s.as_ptr()); // n == 1 returns clone
+
+    let r2 = s.repeat(2);
+    assert_eq!(r2.len(), s.len() * 2);
+    assert!(r2.is_heap_allocated());
+
+    let r5 = s.repeat(5);
+    assert_eq!(r5.len(), s.len() * 5);
+    assert!(r5.is_heap_allocated());
+}
+
+#[test]
+fn repeat_static() {
+    let s = LeanString::from_static_str("0123456789abcdefghijklmnopqrstuvwxyz");
+    assert!(!s.is_heap_allocated());
+    assert!(s.as_static_str().is_some());
+
+    let r1 = s.repeat(1);
+    assert!(!r1.is_heap_allocated());
+    assert_eq!(r1.as_static_str(), s.as_static_str());
+
+    let r2 = s.repeat(2);
+    assert!(r2.is_heap_allocated());
+    assert_eq!(r2, s.as_str().repeat(2))
+}
+
+#[test]
+fn try_repeat_overflow_is_err() {
     let s = LeanString::from("ab");
-    let _ = s.repeat(usize::MAX);
+    assert!(s.try_repeat(usize::MAX).is_err());
+}
+
+// Adapted from the Rust standard library tests for `str::to_lowercase`.
+// https://github.com/rust-lang/rust/blob/1.98.1/library/alloctests/tests/str.rs
+#[test]
+fn to_lowercase() {
+    let lower = |s: &str| LeanString::from(s).to_lowercase();
+
+    assert_eq!(lower(""), "");
+    assert_eq!(lower("AÉǅaé "), "aéǆaé ");
+
+    // https://github.com/rust-lang/rust/issues/26035
+    assert_eq!(lower("ΑΣ"), "ας");
+    assert_eq!(lower("Α'Σ"), "α'ς");
+    assert_eq!(lower("Α''Σ"), "α''ς");
+
+    assert_eq!(lower("ΑΣ Α"), "ας α");
+    assert_eq!(lower("Α'Σ Α"), "α'ς α");
+    assert_eq!(lower("Α''Σ Α"), "α''ς α");
+
+    assert_eq!(lower("ΑΣ' Α"), "ας' α");
+    assert_eq!(lower("ΑΣ'' Α"), "ας'' α");
+
+    assert_eq!(lower("Α'Σ' Α"), "α'ς' α");
+    assert_eq!(lower("Α''Σ'' Α"), "α''ς'' α");
+
+    assert_eq!(lower("Α Σ"), "α σ");
+    assert_eq!(lower("Α 'Σ"), "α 'σ");
+    assert_eq!(lower("Α ''Σ"), "α ''σ");
+
+    assert_eq!(lower("Σ"), "σ");
+    assert_eq!(lower("'Σ"), "'σ");
+    assert_eq!(lower("''Σ"), "''σ");
+
+    assert_eq!(lower("ΑΣΑ"), "ασα");
+    assert_eq!(lower("ΑΣ'Α"), "ασ'α");
+    assert_eq!(lower("ΑΣ''Α"), "ασ''α");
+
+    // https://github.com/rust-lang/rust/issues/124714
+    // input lengths around the boundary of the chunk size used by the ascii prefix optimization
+    assert_eq!(lower("abcdefghijklmnoΣ"), "abcdefghijklmnoς");
+    assert_eq!(lower("abcdefghijklmnopΣ"), "abcdefghijklmnopς");
+    assert_eq!(lower("abcdefghijklmnopqΣ"), "abcdefghijklmnopqς");
+
+    // a really long string that has it's lowercase form
+    // even longer. this tests that implementations don't assume
+    // an incorrect upper bound on allocations
+    assert_eq!(lower(&"İ".repeat(512)), "i̇".repeat(512));
+
+    // a really long ascii-only string.
+    // This test that the ascii hot-path
+    // functions correctly
+    assert_eq!(lower(&"A".repeat(511)), "a".repeat(511));
+}
+
+// Adapted from the Rust standard library tests for `str::to_uppercase`.
+// https://github.com/rust-lang/rust/blob/1.98.1/library/alloctests/tests/str.rs
+#[test]
+fn to_uppercase() {
+    let upper = |s: &str| LeanString::from(s).to_uppercase();
+
+    assert_eq!(upper(""), "");
+    assert_eq!(upper("aéǅßẞﬁᾀ"), "AÉǄSSẞFIἈΙ");
+}
+
+#[test]
+fn to_lowercase_final_sigma_after_lowercase_letter() {
+    // 'α' is unchanged by lowercasing, but it still makes the following 'Σ' word-final.
+    assert_eq!(LeanString::from("αΣ").to_lowercase(), "ας");
+}
+
+#[test]
+fn case_conversion_fills_inline_buffer() {
+    let upper = "a".repeat(INLINE_LIMIT - 1) + "A";
+    assert_eq!(LeanString::from(upper.as_str()).to_lowercase(), "a".repeat(INLINE_LIMIT));
+
+    let lower = "A".repeat(INLINE_LIMIT - 1) + "a";
+    assert_eq!(LeanString::from(lower.as_str()).to_uppercase(), "A".repeat(INLINE_LIMIT));
+}
+
+#[test]
+fn case_conversion_without_change_shares_buffer() {
+    let ascii = LeanString::from("already lowercase and heap allocated");
+    let non_ascii = LeanString::from("déjà lowercase and heap allocated");
+    let non_ascii_upper = LeanString::from("DÉJÀ UPPERCASE AND HEAP ALLOCATED");
+    assert!(ascii.is_heap_allocated());
+    assert!(non_ascii.is_heap_allocated());
+    assert!(non_ascii_upper.is_heap_allocated());
+
+    assert_eq!(ascii.to_ascii_lowercase().as_ptr(), ascii.as_ptr());
+    assert_eq!(ascii.to_lowercase().as_ptr(), ascii.as_ptr());
+    assert_eq!(non_ascii.to_ascii_lowercase().as_ptr(), non_ascii.as_ptr());
+    assert_eq!(non_ascii.to_lowercase().as_ptr(), non_ascii.as_ptr());
+    assert_eq!(non_ascii_upper.to_ascii_uppercase().as_ptr(), non_ascii_upper.as_ptr());
+    assert_eq!(non_ascii_upper.to_uppercase().as_ptr(), non_ascii_upper.as_ptr());
+
+    let static_ = LeanString::from_static_str("ALREADY UPPERCASE AND STATIC");
+    assert!(static_.to_ascii_uppercase().as_static_str().is_some());
+    assert!(static_.to_uppercase().as_static_str().is_some());
+}
+
+#[test]
+fn make_ascii_case_without_change_keeps_buffer_shared() {
+    let mut heap = LeanString::from("already lowercase and heap allocated");
+    let cloned = heap.clone();
+    heap.make_ascii_lowercase();
+    assert_eq!(heap.as_ptr(), cloned.as_ptr());
+
+    let mut static_ = LeanString::from_static_str("ALREADY UPPERCASE AND STATIC");
+    static_.make_ascii_uppercase();
+    assert!(static_.as_static_str().is_some());
+}
+
+#[test]
+fn make_ascii_case_inline() {
+    let mut inline = LeanString::from("Grüße");
+    assert!(!inline.is_heap_allocated());
+    inline.make_ascii_uppercase();
+    assert_eq!(inline, "GRüßE");
+    inline.make_ascii_lowercase();
+    assert_eq!(inline, "grüße");
+}
+
+#[test]
+fn make_ascii_case_unique_heap_in_place() {
+    let mut heap = LeanString::from("Mixed Case And Heap Allocated");
+    let ptr = heap.as_ptr();
+    heap.make_ascii_uppercase();
+    assert_eq!(heap, "MIXED CASE AND HEAP ALLOCATED");
+    assert_eq!(heap.as_ptr(), ptr);
+}
+
+#[test]
+fn make_ascii_case_shared_heap_detaches() {
+    let mut heap = LeanString::from("Mixed Case And Heap Allocated");
+    let cloned = heap.clone();
+    heap.make_ascii_lowercase();
+    assert_eq!(heap, "mixed case and heap allocated");
+    assert_eq!(cloned, "Mixed Case And Heap Allocated");
+    assert_ne!(heap.as_ptr(), cloned.as_ptr());
+}
+
+#[test]
+fn make_ascii_case_static() {
+    let mut static_ = LeanString::from_static_str("Mixed Case And Static");
+    static_.make_ascii_uppercase();
+    assert_eq!(static_, "MIXED CASE AND STATIC");
+    assert!(static_.is_heap_allocated());
+
+    // A static string truncated to fit inline becomes inline.
+    let mut static_ = LeanString::from_static_str("Mixed Case And Static");
+    static_.truncate(5);
+    static_.make_ascii_lowercase();
+    assert_eq!(static_, "mixed");
+    assert!(!static_.is_heap_allocated());
 }
 
 #[test]

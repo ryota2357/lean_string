@@ -23,6 +23,30 @@ fn from_char() {
 }
 
 #[test]
+fn from_char_utf8_length_boundaries() {
+    let chars = [
+        '\0',
+        'a',
+        '\u{7F}',
+        '\u{80}',
+        'é',
+        '\u{7FF}',
+        '\u{800}',
+        'あ',
+        '\u{FFFF}',
+        '\u{10000}',
+        '🦀',
+        '\u{10FFFF}',
+    ];
+    for ch in chars {
+        let s = LeanStr::from(ch);
+        assert_eq!(s, String::from(ch));
+        assert_eq!(s.len(), ch.len_utf8());
+        assert!(!s.is_heap_allocated());
+    }
+}
+
+#[test]
 fn from_around_inline_limit() {
     let s = &String::from("0123456789abcdefg");
 
@@ -67,4 +91,141 @@ fn clone_shares_heap_buffer() {
 
     drop(s);
     assert_eq!(cloned, "abcdefghijklmnopqrstuvwxyz");
+}
+
+#[test]
+fn repeat_around_inline() {
+    let s = LeanStr::from("a");
+    assert!(!s.is_heap_allocated());
+
+    assert_eq!(s.repeat(1), "a");
+
+    let inline = s.repeat(INLINE_LIMIT);
+    assert_eq!(inline, "a".repeat(INLINE_LIMIT));
+    assert!(!inline.is_heap_allocated());
+
+    let heap = s.repeat(INLINE_LIMIT + 1);
+    assert_eq!(heap, "a".repeat(INLINE_LIMIT + 1));
+    assert!(heap.is_heap_allocated());
+}
+
+#[test]
+fn repeat_zero_or_empty() {
+    let inline = LeanStr::from("ab");
+    assert!(!inline.is_heap_allocated());
+    assert_eq!(inline.repeat(0), "");
+    assert!(!inline.repeat(0).is_heap_allocated());
+
+    let heap = LeanStr::from("a".repeat(INLINE_LIMIT + 1).as_str());
+    assert!(heap.is_heap_allocated());
+    assert_eq!(heap.repeat(0), "");
+    assert!(!heap.repeat(0).is_heap_allocated());
+
+    let empty = LeanStr::new();
+    assert_eq!(empty.repeat(0), "");
+    assert_eq!(empty.repeat(1), "");
+    assert_eq!(empty.repeat(100), "");
+}
+
+#[test]
+fn repeat_heap() {
+    let s = LeanStr::from("a".repeat(INLINE_LIMIT + 1).as_str());
+    assert!(s.is_heap_allocated());
+
+    let r1 = s.repeat(1);
+    assert_eq!(r1, s);
+    assert_eq!(r1.as_ptr(), s.as_ptr()); // n == 1 returns clone
+
+    let r2 = s.repeat(2);
+    assert_eq!(r2.len(), s.len() * 2);
+    assert!(r2.is_heap_allocated());
+
+    let r5 = s.repeat(5);
+    assert_eq!(r5.len(), s.len() * 5);
+    assert!(r5.is_heap_allocated());
+}
+
+#[test]
+fn repeat_static() {
+    let s = LeanStr::from_static_str("0123456789abcdefghijklmnopqrstuvwxyz");
+    assert!(!s.is_heap_allocated());
+    assert!(s.as_static_str().is_some());
+
+    let r1 = s.repeat(1);
+    assert!(!r1.is_heap_allocated());
+    assert_eq!(r1.as_static_str(), s.as_static_str());
+
+    let r2 = s.repeat(2);
+    assert!(r2.is_heap_allocated());
+    assert_eq!(r2, s.as_str().repeat(2))
+}
+
+#[test]
+fn try_repeat_overflow_is_err() {
+    let s = LeanStr::from("ab");
+    assert!(s.try_repeat(usize::MAX).is_err());
+}
+
+#[test]
+fn case_conversion_around_inline() {
+    let inline = "a".repeat(INLINE_LIMIT - 1) + "A";
+    let inline = LeanStr::from(inline.as_str()).to_lowercase();
+    assert_eq!(inline, "a".repeat(INLINE_LIMIT));
+    assert!(!inline.is_heap_allocated());
+
+    let heap = "A".repeat(INLINE_LIMIT) + "a";
+    let heap = LeanStr::from(heap.as_str()).to_uppercase();
+    assert_eq!(heap, "A".repeat(INLINE_LIMIT + 1));
+    assert!(heap.is_heap_allocated());
+}
+
+#[test]
+fn case_conversion_without_change_shares_buffer() {
+    let non_ascii = LeanStr::from("déjà lowercase and heap allocated");
+    assert!(non_ascii.is_heap_allocated());
+    assert_eq!(non_ascii.to_lowercase().as_ptr(), non_ascii.as_ptr());
+
+    let static_ = LeanStr::from_static_str("DÉJÀ UPPERCASE AND STATIC");
+    assert!(static_.to_uppercase().as_static_str().is_some());
+}
+
+#[test]
+fn case_conversion_static() {
+    let static_ = LeanStr::from_static_str("Déjà Mixed Case And Static");
+    let upper = static_.to_uppercase();
+    assert_eq!(upper, "DÉJÀ MIXED CASE AND STATIC");
+    assert!(upper.as_static_str().is_none());
+    assert_eq!(static_, "Déjà Mixed Case And Static");
+}
+
+#[test]
+fn ascii_case_conversion_around_inline() {
+    let inline = "a".repeat(INLINE_LIMIT - 1) + "A";
+    let inline = LeanStr::from(inline.as_str()).to_ascii_lowercase();
+    assert_eq!(inline, "a".repeat(INLINE_LIMIT));
+    assert!(!inline.is_heap_allocated());
+
+    let heap = "A".repeat(INLINE_LIMIT) + "a";
+    let heap = LeanStr::from(heap.as_str()).to_ascii_uppercase();
+    assert_eq!(heap, "A".repeat(INLINE_LIMIT + 1));
+    assert!(heap.is_heap_allocated());
+}
+
+#[test]
+fn ascii_case_conversion_without_change_shares_buffer() {
+    let heap = LeanStr::from("already lowercase and heap allocated");
+    assert!(heap.is_heap_allocated());
+    assert_eq!(heap.to_ascii_lowercase().as_ptr(), heap.as_ptr());
+
+    let static_ = LeanStr::from_static_str("ALREADY UPPERCASE AND STATIC");
+    assert!(static_.to_ascii_uppercase().as_static_str().is_some());
+}
+
+#[test]
+fn ascii_case_conversion_static() {
+    let static_ = LeanStr::from_static_str("Mixed Case And Static");
+    let upper = static_.to_ascii_uppercase();
+    assert_eq!(upper, "MIXED CASE AND STATIC");
+    assert!(upper.as_static_str().is_none());
+    assert_eq!(static_, "Mixed Case And Static");
 }

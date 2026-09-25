@@ -64,15 +64,17 @@ macro_rules! impl_NumToRepr_for_integers {
                 let mut curr = digits_count;
 
                 // SAFETY:
-                // - The closure initializes all `digits_count` bytes with the decimal digits
-                //   (and the `-` sign for negative numbers), writing backward from the end of
-                //   the buffer until `curr` reaches 0.
+                // - The closure initializes all `digits_count` bytes of `buf` with the decimal
+                //   digits (and the `-` sign for negative numbers), writing backward from the end
+                //   of `buf` until `curr` reaches 0.
                 // - Since `d1` and `d2` are always less than or equal to `198`, we can copy from
                 //   `lut_ptr[d1..d1 + 1]` and `lut_ptr[d2..d2 + 1]`.
                 // - Since `n` is always non-negative, this means that `curr > 0` so
-                //   `buf_ptr[curr..curr + 1]` is safe to access.
+                //   `buf_ptr[curr..curr + 1]` is within `buf`.
                 let repr = unsafe {
-                    Repr::new_with(digits_count, |buf_ptr: *mut u8| {
+                    Repr::new_with(digits_count, |buf| {
+                        let buf_ptr = buf.as_mut_ptr().cast::<u8>();
+
                         // need at least 16 bits for the 4-characters-at-a-time to work.
                         // This block will be removed for smaller types at compile time and in the
                         // worst case, it will prevent to have the `10000` literal to overflow for `i8

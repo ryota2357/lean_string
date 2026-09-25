@@ -1,6 +1,7 @@
 use super::ReserveError;
+use super::case::{self, CaseMapping};
 
-use core::{hint, marker::PhantomData, mem, ptr, slice, str};
+use core::{hint, marker::PhantomData, mem, mem::MaybeUninit, ptr, slice, str};
 
 #[cfg(not(loom))]
 use core::sync::atomic::{Ordering::*, fence};
@@ -89,12 +90,7 @@ impl<M: Mutability> Repr<M> {
 
     #[inline]
     pub(crate) fn from_char(ch: char) -> Self {
-        let inline = unsafe {
-            let mut buffer = [0; 4];
-            let str = ch.encode_utf8(&mut buffer);
-            InlineBuffer::new(str)
-        };
-        Repr::from_inline(inline)
+        Repr::from_inline(InlineBuffer::from_char(ch))
     }
 
     #[inline]
@@ -126,28 +122,75 @@ impl<M: Mutability> Repr<M> {
         value.into_repr()
     }
 
-    /// Creates a `Repr` of exactly `len` bytes whose contents are written by `init`.
-    ///
     /// NOTE: If `init` panics, a heap allocation may leak (which is safe).
     ///
     /// # Safety
     ///
-    /// `init` must initialize all `len` bytes with valid UTF-8.
-    unsafe fn new_with(len: usize, init: impl FnOnce(*mut u8)) -> Result<Self, ReserveError> {
+    /// `init` must initialize all bytes of the slice it is given, which is `len` bytes long, with
+    /// valid UTF-8.
+    unsafe fn new_with(
+        len: usize,
+        init: impl FnOnce(&mut [MaybeUninit<u8>]),
+    ) -> Result<Self, ReserveError> {
         if len <= MAX_INLINE_SIZE {
             let mut buffer = InlineBuffer::empty();
-            init(buffer.as_mut_ptr());
+            // SAFETY: `buffer` holds `MAX_INLINE_SIZE >= len` initialized bytes.
+            let dst = unsafe { slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), len) };
+            init(dst);
             // SAFETY:
-            // - From `#Safety`, `init` initialized `len` bytes with valid UTF-8.
+            // - From `# Safety`, `init` initialized `len` bytes with valid UTF-8.
             // - `len` is less than or equal to `MAX_INLINE_SIZE`.
             unsafe { buffer.set_len(len) };
             Ok(Repr::from_inline(buffer))
         } else {
-            // SAFETY: From `#Safety`, `init` initializes all `len` bytes below.
+            // SAFETY: From `# Safety`, `init` initializes all `len` bytes below.
             let buffer = unsafe { HeapBuffer::<M>::new_uninit(len) }?;
-            init(buffer.ptr().as_ptr());
+            // SAFETY: `buffer` is allocated for `len` bytes.
+            let dst = unsafe { slice::from_raw_parts_mut(buffer.ptr().as_ptr().cast(), len) };
+            init(dst);
             Ok(Repr::from_heap(buffer))
         }
+    }
+
+    #[inline]
+    pub(crate) fn repeat(&self, n: usize) -> Result<Self, ReserveError> {
+        if n == 1 {
+            return Ok(self.make_shallow_clone());
+        }
+
+        let text = self.as_bytes();
+        let len = text.len().checked_mul(n).ok_or(ReserveError)?;
+
+        // SAFETY: `init` fills all `len` bytes with `n` copies of `text`, and a concatenation of
+        // valid UTF-8 is valid UTF-8.
+        unsafe {
+            Repr::new_with(len, |dst| {
+                for (d, &b) in dst.iter_mut().zip(text) {
+                    d.write(b);
+                }
+                // O(log n) copies
+                let mut filled = text.len();
+                while filled < len {
+                    let (src, rest) = dst.split_at_mut(filled);
+                    let count = filled.min(rest.len());
+                    rest[..count].copy_from_slice(&src[..count]);
+                    filled += count;
+                }
+            })
+        }
+    }
+
+    #[inline]
+    pub(crate) fn to_ascii_case(&self, mapping: CaseMapping) -> Result<Self, ReserveError> {
+        let text = self.as_str();
+        if !case::changes_ascii(text.as_bytes(), mapping) {
+            return Ok(self.make_shallow_clone());
+        }
+
+        // SAFETY: `init` writes all `text.len()` bytes mapped from `text`. The ASCII case mapping
+        // maps an ASCII letter to an ASCII letter and leaves any other byte unchanged, so the
+        // result is valid UTF-8 like `text`.
+        unsafe { Repr::new_with(text.len(), |dst| case::map_ascii(text.as_bytes(), dst, mapping)) }
     }
 
     #[cfg(target_pointer_width = "64")]
@@ -423,6 +466,40 @@ impl Repr<Mutable> {
         }
     }
 
+    /// # Safety
+    ///
+    /// `init` must initialize the first `len` bytes of the slice it is given with valid UTF-8,
+    /// where `len` is the value it returns, and must not write uninitialized bytes to the slice.
+    pub(crate) unsafe fn with_capacity_init(
+        capacity: usize,
+        init: impl FnOnce(&mut [MaybeUninit<u8>]) -> usize,
+    ) -> Result<Self, ReserveError> {
+        if capacity <= MAX_INLINE_SIZE {
+            let mut buffer = InlineBuffer::empty();
+            // SAFETY: `buffer` holds `MAX_INLINE_SIZE` initialized bytes, and from `# Safety`,
+            // `init` keeps them initialized.
+            let dst =
+                unsafe { slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), MAX_INLINE_SIZE) };
+            let len = init(dst);
+            // SAFETY: From `# Safety`, `init` initialized `len <= MAX_INLINE_SIZE` bytes with
+            // valid UTF-8.
+            unsafe { buffer.set_len(len) };
+            Ok(Repr::from_inline(buffer))
+        } else {
+            let mut buffer = HeapBuffer::<Mutable>::with_capacity(capacity)?;
+            // SAFETY: `buffer` is allocated for `buffer.capacity()` bytes.
+            let dst = unsafe {
+                slice::from_raw_parts_mut(buffer.ptr().as_ptr().cast(), buffer.capacity())
+            };
+            let len = init(dst);
+            // SAFETY:
+            // - From `# Safety`, `init` initialized `len <= capacity` bytes with valid UTF-8.
+            // - `buffer` was just created, so it is unique.
+            unsafe { buffer.set_len(len) };
+            Ok(Repr::from_heap(buffer))
+        }
+    }
+
     #[inline]
     pub(crate) fn capacity(&self) -> usize {
         if self.is_heap_buffer() {
@@ -665,7 +742,16 @@ impl Repr<Mutable> {
         &mut self,
         mut predicate: impl FnMut(char) -> bool,
     ) -> Result<(), ReserveError> {
+        // Look for the first character to remove before making the buffer modifiable, so that a
+        // shared or static buffer is kept as it is if nothing is removed.
+        let Some((removed_idx, removed)) =
+            self.as_str().char_indices().find(|&(_, ch)| !predicate(ch))
+        else {
+            return Ok(());
+        };
+
         // We will modify the buffer, we need to make sure it.
+        // This keeps the content, so `removed_idx` still points at `removed`.
         self.ensure_modifiable()?;
 
         struct SetLenOnDrop<'a> {
@@ -675,7 +761,12 @@ impl Repr<Mutable> {
         }
 
         let len = self.len();
-        let mut g = SetLenOnDrop { self_: self, src_idx: 0, dst_idx: 0 };
+        // Resume just after `removed`, which is dropped without calling `predicate` again.
+        let mut g = SetLenOnDrop {
+            self_: self,
+            src_idx: removed_idx + removed.len_utf8(),
+            dst_idx: removed_idx,
+        };
 
         // SAFETY: `ensure_modifiable` guarantees that the buffer is not StaticBuffer and that
         // a heap buffer is unique.
@@ -712,12 +803,33 @@ impl Repr<Mutable> {
             fn drop(&mut self) {
                 // SAFETY:
                 // - `dst_idx <= src_idx`, and `src_idx <= len`, so `dst_idx <= len`.
-                // - `dst_idx` doesn't split a char because it is a sum of `ch_len`.
+                // - `dst_idx` doesn't split a char because it starts at a char boundary and
+                //   advances by `ch_len`.
                 unsafe { self.self_.set_len(self.dst_idx) }
             }
         }
         drop(g);
 
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn make_ascii_case(&mut self, mapping: CaseMapping) -> Result<(), ReserveError> {
+        if self.is_static_buffer() || !self.is_unique() {
+            // Copy and map in a single pass, rather than `ensure_modifiable` followed by the
+            // in-place mapping below. This also keeps the buffer shared if no byte changes.
+            let mapped = self.to_ascii_case(mapping)?;
+            self.replace_inner(mapped);
+        } else {
+            let len = self.len();
+            // SAFETY:
+            // - We just checked that the buffer is not StaticBuffer and is unique.
+            // - The buffer holds `len` initialized bytes.
+            // - The ASCII case mapping maps an ASCII letter to an ASCII letter and leaves any
+            //   other byte unchanged, so the buffer remains valid UTF-8.
+            let bytes = unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), len) };
+            case::map_ascii_in_place(bytes, mapping);
+        }
         Ok(())
     }
 

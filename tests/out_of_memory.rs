@@ -163,6 +163,50 @@ fn extend_with_empty_iterator_keeps_heap_buffer_shared() {
 }
 
 #[test]
+fn retain_keeping_all_keeps_static_buffer() {
+    let mut string = LeanString::from_static_str(TEXT);
+    let static_ptr = string.as_ptr();
+
+    let result = without_allocating(|| string.try_retain(|_| true));
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(string, TEXT);
+    assert_eq!(string.as_ptr(), static_ptr);
+    assert!(!string.is_heap_allocated());
+}
+
+#[test]
+fn retain_keeping_all_keeps_heap_buffer_shared() {
+    let mut string = LeanString::from(TEXT);
+    let shared = string.clone();
+    let shared_ptr = string.as_ptr();
+
+    let result = without_allocating(|| string.try_retain(|_| true));
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(string, TEXT);
+    assert_eq!(shared, TEXT);
+    assert_eq!(string.as_ptr(), shared_ptr);
+    assert_eq!(shared.as_ptr(), shared_ptr);
+}
+
+#[test]
+fn try_retain_allocation_failure_leaves_string_unchanged() {
+    let mut string = LeanString::from(TEXT);
+    let shared = string.clone();
+    let shared_ptr = string.as_ptr();
+
+    FAIL_NEXT_ALLOCATION.set(true);
+    let result = string.try_retain(|c| c != ' ');
+    FAIL_NEXT_ALLOCATION.set(false);
+
+    assert_eq!(result, Err(ReserveError));
+    assert_eq!(string, TEXT);
+    assert_eq!(string.as_ptr(), shared_ptr);
+    assert_eq!(shared.as_ptr(), shared_ptr);
+}
+
+#[test]
 fn try_to_lean_s_allocation_failure() {
     struct PropagatesWriteFailure;
     impl fmt::Display for PropagatesWriteFailure {
