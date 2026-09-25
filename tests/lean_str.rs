@@ -167,6 +167,38 @@ fn try_repeat_overflow_is_err() {
 }
 
 #[test]
+fn case_conversion_around_inline() {
+    let inline = "a".repeat(INLINE_LIMIT - 1) + "A";
+    let inline = LeanStr::from(inline.as_str()).to_lowercase();
+    assert_eq!(inline, "a".repeat(INLINE_LIMIT));
+    assert!(!inline.is_heap_allocated());
+
+    let heap = "A".repeat(INLINE_LIMIT) + "a";
+    let heap = LeanStr::from(heap.as_str()).to_uppercase();
+    assert_eq!(heap, "A".repeat(INLINE_LIMIT + 1));
+    assert!(heap.is_heap_allocated());
+}
+
+#[test]
+fn case_conversion_without_change_shares_buffer() {
+    let non_ascii = LeanStr::from("déjà lowercase and heap allocated");
+    assert!(non_ascii.is_heap_allocated());
+    assert_eq!(non_ascii.to_lowercase().as_ptr(), non_ascii.as_ptr());
+
+    let static_ = LeanStr::from_static_str("DÉJÀ UPPERCASE AND STATIC");
+    assert!(static_.to_uppercase().as_static_str().is_some());
+}
+
+#[test]
+fn case_conversion_static() {
+    let static_ = LeanStr::from_static_str("Déjà Mixed Case And Static");
+    let upper = static_.to_uppercase();
+    assert_eq!(upper, "DÉJÀ MIXED CASE AND STATIC");
+    assert!(upper.as_static_str().is_none());
+    assert_eq!(static_, "Déjà Mixed Case And Static");
+}
+
+#[test]
 fn ascii_case_conversion_around_inline() {
     let inline = "a".repeat(INLINE_LIMIT - 1) + "A";
     let inline = LeanStr::from(inline.as_str()).to_ascii_lowercase();

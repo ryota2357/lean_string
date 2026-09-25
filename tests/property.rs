@@ -305,13 +305,17 @@ fn case_conversion_input() -> impl Strategy<Value = String> {
 #[property_test]
 #[cfg_attr(miri, ignore)]
 fn to_lowercase(#[strategy = case_conversion_input()] input: String) {
-    prop_assert_eq!(LeanString::from(input.as_str()).to_lowercase(), input.to_lowercase());
+    let expected = input.to_lowercase();
+    prop_assert_eq!(LeanString::from(input.as_str()).to_lowercase(), expected.as_str());
+    prop_assert_eq!(LeanStr::from(input.as_str()).to_lowercase(), expected.as_str());
 }
 
 #[property_test]
 #[cfg_attr(miri, ignore)]
 fn to_uppercase(#[strategy = case_conversion_input()] input: String) {
-    prop_assert_eq!(LeanString::from(input.as_str()).to_uppercase(), input.to_uppercase());
+    let expected = input.to_uppercase();
+    prop_assert_eq!(LeanString::from(input.as_str()).to_uppercase(), expected.as_str());
+    prop_assert_eq!(LeanStr::from(input.as_str()).to_uppercase(), expected.as_str());
 }
 
 #[property_test]
