@@ -26,7 +26,7 @@ mod repr;
 use repr::{Immutable, Mutable, Repr};
 
 mod case;
-use case::CaseMapping;
+use case::Case;
 
 mod errors;
 pub use errors::*;
@@ -1045,11 +1045,12 @@ impl LeanString {
     /// let odysseus = LeanString::from("ὈΔΥΣΣΕΎΣ");
     /// assert_eq!(odysseus.to_lowercase(), "ὀδυσσεύς");
     /// ```
-    // NOTE: There is no `try_to_lowercase()`, because the conversion of 'Σ' below relies on
+    // NOTE: There is no `try_to_lowercase()`, because the conversion of 'Σ' relies on
     //       `str::to_lowercase()`, whose allocation failure can't be reported as a `ReserveError`.
+    #[inline]
     #[must_use = "this returns the lowercase string as a new LeanString, without modifying the original"]
     pub fn to_lowercase(&self) -> Self {
-        Self::map_case_if_changed(self, CaseMapping::ToLower).unwrap_or_else(|| self.clone())
+        Repr::to_case(self, Case::Lower).unwrap_with_msg().map_or_else(|| self.clone(), LeanString)
     }
 
     /// Returns the uppercase equivalent of this [`LeanString`], as a new [`LeanString`].
@@ -1081,42 +1082,10 @@ impl LeanString {
     /// ```
     // NOTE: There is no `try_to_uppercase()`, for symmetry with `to_lowercase()`, which can't have
     //       a `try_` version.
+    #[inline]
     #[must_use = "this returns the uppercase string as a new LeanString, without modifying the original"]
     pub fn to_uppercase(&self) -> Self {
-        Self::map_case_if_changed(self, CaseMapping::ToUpper).unwrap_or_else(|| self.clone())
-    }
-
-    #[inline]
-    fn map_case_if_changed(text: &str, mapping: CaseMapping) -> Option<Self> {
-        let (unchanged, rest) = case::split_at_change(text, mapping)?;
-
-        // SAFETY: `init` initializes `unchanged.len() + ascii_len` bytes with `unchanged` followed
-        // by the ASCII bytes written by `map_while_ascii`.
-        let mapped = unsafe {
-            Repr::with_capacity_init(text.len(), |dst| {
-                let (dst_unchanged, dst_rest) = dst.split_at_mut(unchanged.len());
-                for (d, &b) in dst_unchanged.iter_mut().zip(unchanged.as_bytes()) {
-                    d.write(b);
-                }
-                unchanged.len() + case::map_while_ascii(rest.as_bytes(), dst_rest, mapping)
-            })
-        };
-        let mut mapped = LeanString(mapped.unwrap_with_msg());
-        let ascii_len = mapped.len() - unchanged.len();
-
-        for c in rest[ascii_len..].chars() {
-            match mapping {
-                CaseMapping::ToLower if c == 'Σ' => {
-                    // Σ maps to σ, except at the end of a word where it maps to ς. The condition
-                    // (`Final_Sigma` in the Unicode Standard) depends on Unicode properties that
-                    // are not exposed by the standard library, so let it convert the whole string.
-                    return Some(LeanString::from(text.to_lowercase()));
-                }
-                CaseMapping::ToLower => c.to_lowercase().for_each(|l| mapped.push(l)),
-                CaseMapping::ToUpper => c.to_uppercase().for_each(|u| mapped.push(u)),
-            }
-        }
-        Some(mapped)
+        Repr::to_case(self, Case::Upper).unwrap_with_msg().map_or_else(|| self.clone(), LeanString)
     }
 
     /// Returns a copy of this [`LeanString`] where each character is mapped to its ASCII lower
@@ -1155,7 +1124,7 @@ impl LeanString {
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_lowercase(&self) -> Result<Self, ReserveError> {
-        self.0.to_ascii_case(CaseMapping::ToLower).map(LeanString)
+        self.0.to_ascii_case(Case::Lower).map(LeanString)
     }
 
     /// Returns a copy of this [`LeanString`] where each character is mapped to its ASCII upper
@@ -1194,7 +1163,7 @@ impl LeanString {
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_uppercase(&self) -> Result<Self, ReserveError> {
-        self.0.to_ascii_case(CaseMapping::ToUpper).map(LeanString)
+        self.0.to_ascii_case(Case::Upper).map(LeanString)
     }
 
     /// Converts this [`LeanString`] to its ASCII lower case equivalent in-place.
@@ -1230,7 +1199,7 @@ impl LeanString {
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
     #[inline]
     pub fn try_make_ascii_lowercase(&mut self) -> Result<(), ReserveError> {
-        self.0.make_ascii_case(CaseMapping::ToLower)
+        self.0.make_ascii_case(Case::Lower)
     }
 
     /// Converts this [`LeanString`] to its ASCII upper case equivalent in-place.
@@ -1266,7 +1235,7 @@ impl LeanString {
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
     #[inline]
     pub fn try_make_ascii_uppercase(&mut self) -> Result<(), ReserveError> {
-        self.0.make_ascii_case(CaseMapping::ToUpper)
+        self.0.make_ascii_case(Case::Upper)
     }
 
     /// Shortens a [`LeanString`] to the specified length.
@@ -2012,10 +1981,12 @@ impl LeanStr {
     /// assert_eq!(odysseus.to_lowercase(), "ὀδυσσεύς");
     /// ```
     // NOTE: There is no `try_to_lowercase()`, for the same reason as `LeanString::to_lowercase()`.
+    #[inline]
     #[must_use]
     pub fn to_lowercase(&self) -> Self {
-        LeanString::map_case_if_changed(self, CaseMapping::ToLower)
-            .map_or_else(|| self.clone(), LeanString::into_lean_str)
+        Repr::to_case(self, Case::Lower)
+            .unwrap_with_msg()
+            .map_or_else(|| self.clone(), |lower| LeanString(lower).into_lean_str())
     }
 
     /// Returns the uppercase equivalent of this [`LeanStr`], as a new [`LeanStr`].
@@ -2047,10 +2018,12 @@ impl LeanStr {
     /// ```
     // NOTE: There is no `try_to_uppercase()`, for symmetry with `to_lowercase()`, which can't have
     //       a `try_` version.
+    #[inline]
     #[must_use]
     pub fn to_uppercase(&self) -> Self {
-        LeanString::map_case_if_changed(self, CaseMapping::ToUpper)
-            .map_or_else(|| self.clone(), LeanString::into_lean_str)
+        Repr::to_case(self, Case::Upper)
+            .unwrap_with_msg()
+            .map_or_else(|| self.clone(), |upper| LeanString(upper).into_lean_str())
     }
 
     /// Returns a copy of this [`LeanStr`] where each character is mapped to its ASCII lower case
@@ -2084,7 +2057,7 @@ impl LeanStr {
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_lowercase(&self) -> Result<Self, ReserveError> {
-        self.0.to_ascii_case(CaseMapping::ToLower).map(LeanStr)
+        self.0.to_ascii_case(Case::Lower).map(LeanStr)
     }
 
     /// Returns a copy of this [`LeanStr`] where each character is mapped to its ASCII upper case
@@ -2118,7 +2091,7 @@ impl LeanStr {
     /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_uppercase(&self) -> Result<Self, ReserveError> {
-        self.0.to_ascii_case(CaseMapping::ToUpper).map(LeanStr)
+        self.0.to_ascii_case(Case::Upper).map(LeanStr)
     }
 
     /// Converts the [`LeanStr`] into a [`LeanString`].

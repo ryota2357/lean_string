@@ -1,104 +1,64 @@
-use core::mem::MaybeUninit;
-
 // The width of a 128-bit vector register, which most targets have.
 const CHUNK_SIZE: usize = 16;
 
 #[derive(Clone, Copy)]
-pub(crate) enum CaseMapping {
-    ToLower,
-    ToUpper,
-}
-
-impl CaseMapping {
-    #[inline(always)]
-    fn changes_ascii(self, byte: u8) -> bool {
-        match self {
-            CaseMapping::ToLower => byte.is_ascii_uppercase(),
-            CaseMapping::ToUpper => byte.is_ascii_lowercase(),
-        }
-    }
-
-    #[inline(always)]
-    fn map_ascii(self, byte: u8) -> u8 {
-        match self {
-            CaseMapping::ToLower => byte.to_ascii_lowercase(),
-            CaseMapping::ToUpper => byte.to_ascii_uppercase(),
-        }
-    }
-
-    #[inline]
-    fn changes(self, ch: char) -> bool {
-        // A `char` unchanged by the case mapping maps to exactly that `char`.
-        match self {
-            CaseMapping::ToLower => !ch.to_lowercase().eq([ch]),
-            CaseMapping::ToUpper => !ch.to_uppercase().eq([ch]),
-        }
-    }
+pub(crate) enum Case {
+    Lower,
+    Upper,
 }
 
 #[inline]
-pub(crate) fn changes_ascii(bytes: &[u8], mapping: CaseMapping) -> bool {
-    prefix_len_while(bytes, |b| !mapping.changes_ascii(b)) < bytes.len()
-}
-
-#[inline]
-pub(crate) fn map_ascii(src: &[u8], dst: &mut [MaybeUninit<u8>], mapping: CaseMapping) {
-    for (d, &b) in dst.iter_mut().zip(src) {
-        d.write(mapping.map_ascii(b));
-    }
-}
-
-#[inline]
-pub(crate) fn map_ascii_in_place(bytes: &mut [u8], mapping: CaseMapping) {
-    match mapping {
-        CaseMapping::ToLower => bytes.make_ascii_lowercase(),
-        CaseMapping::ToUpper => bytes.make_ascii_uppercase(),
-    }
-}
-
-#[inline]
-pub(crate) fn split_at_change(text: &str, mapping: CaseMapping) -> Option<(&str, &str)> {
-    let unchanged_ascii =
-        prefix_len_while(text.as_bytes(), |b| b.is_ascii() && !mapping.changes_ascii(b));
-    let (i, _) = text[unchanged_ascii..].char_indices().find(|&(_, ch)| mapping.changes(ch))?;
-    Some(text.split_at(unchanged_ascii + i))
-}
-
-#[inline]
-pub(crate) fn map_while_ascii(
-    src: &[u8],
-    dst: &mut [MaybeUninit<u8>],
-    mapping: CaseMapping,
-) -> usize {
-    let map_bytes_while_ascii = |src: &[u8], dst: &mut [MaybeUninit<u8>]| {
-        let mut len = 0;
-        for (d, &b) in dst.iter_mut().zip(src) {
-            if !b.is_ascii() {
-                break;
-            }
-            d.write(mapping.map_ascii(b));
-            len += 1;
-        }
-        len
+pub(crate) fn split_at_first_change(text: &str, case: Case) -> Option<(&str, &str)> {
+    let skipped = prefix_len_while(text.as_bytes(), |b| b.is_ascii() && !byte_changes(b, case));
+    let (offset, _) = {
+        // SAFETY: `text[..skipped]` is all ASCII, so `skipped` is a char boundary.
+        let rest = unsafe { text.get_unchecked(skipped..) };
+        rest.char_indices().find(|&(_, c)| char_changes(c, case))?
     };
+    // SAFETY: `skipped + offset` is where the found char starts.
+    Some(unsafe { split_at_unchecked(text, skipped + offset) })
+}
 
-    // Make them the same length, so that their chunks and remainders correspond.
-    let len = src.len().min(dst.len());
-    let (src, dst) = (&src[..len], &mut dst[..len]);
-
-    let (src_chunks, src_remainder) = src.as_chunks::<CHUNK_SIZE>();
-    let (dst_chunks, dst_remainder) = dst.as_chunks_mut::<CHUNK_SIZE>();
-    let mut len = 0;
-    for (src, dst) in src_chunks.iter().zip(dst_chunks) {
-        if !all_bytes(src, |b| b.is_ascii()) {
-            return len + map_bytes_while_ascii(src, dst);
-        }
-        for (d, &b) in dst.iter_mut().zip(src) {
-            d.write(mapping.map_ascii(b));
-        }
-        len += CHUNK_SIZE;
+#[inline]
+pub(crate) fn split_at_first_ascii_change(text: &str, case: Case) -> Option<(&str, &str)> {
+    let mid = prefix_len_while(text.as_bytes(), |b| !byte_changes(b, case));
+    if mid == text.len() {
+        return None;
     }
-    len + map_bytes_while_ascii(src_remainder, dst_remainder)
+    // SAFETY: `mid` is right before a byte that changes, which is ASCII and starts a char.
+    Some(unsafe { split_at_unchecked(text, mid) })
+}
+
+#[inline]
+pub(crate) fn split_ascii_prefix(text: &str) -> (&str, &str) {
+    let mid = prefix_len_while(text.as_bytes(), |b| b.is_ascii());
+    // SAFETY: `text[..mid]` is all ASCII, so `mid` is a char boundary.
+    unsafe { split_at_unchecked(text, mid) }
+}
+
+#[inline(always)]
+fn byte_changes(byte: u8, case: Case) -> bool {
+    match case {
+        Case::Lower => byte.is_ascii_uppercase(),
+        Case::Upper => byte.is_ascii_lowercase(),
+    }
+}
+
+#[inline]
+fn char_changes(ch: char, case: Case) -> bool {
+    match case {
+        Case::Lower => !ch.to_lowercase().eq([ch]),
+        Case::Upper => !ch.to_uppercase().eq([ch]),
+    }
+}
+
+// NOTE: `str::split_at_unchecked()` is private in the standard library.
+/// # Safety
+///
+/// `mid` must be a char boundary of `text`.
+#[inline(always)]
+unsafe fn split_at_unchecked(text: &str, mid: usize) -> (&str, &str) {
+    unsafe { (text.get_unchecked(..mid), text.get_unchecked(mid..)) }
 }
 
 #[inline(always)]

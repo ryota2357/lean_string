@@ -1,5 +1,5 @@
 use super::ReserveError;
-use super::case::{self, CaseMapping};
+use super::case::{self, Case};
 
 use core::{hint, marker::PhantomData, mem, mem::MaybeUninit, ptr, slice, str};
 
@@ -59,13 +59,21 @@ pub(crate) struct Repr<M: Mutability>(*const (), [u8; 3], LastByte, PhantomData<
 const _: () = {
     assert!(size_of::<Repr<Mutable>>() == MAX_INLINE_SIZE);
     assert!(size_of::<Option<Repr<Mutable>>>() == MAX_INLINE_SIZE);
+    assert!(size_of::<Result<Repr<Mutable>, ReserveError>>() == MAX_INLINE_SIZE);
+    assert!(size_of::<Result<Option<Repr<Mutable>>, ReserveError>>() == MAX_INLINE_SIZE);
     assert!(align_of::<Repr<Mutable>>() == align_of::<usize>());
     assert!(align_of::<Option<Repr<Mutable>>>() == align_of::<usize>());
+    assert!(align_of::<Result<Repr<Mutable>, ReserveError>>() == align_of::<usize>());
+    assert!(align_of::<Result<Option<Repr<Mutable>>, ReserveError>>() == align_of::<usize>());
 
     assert!(size_of::<Repr<Immutable>>() == MAX_INLINE_SIZE);
     assert!(size_of::<Option<Repr<Immutable>>>() == MAX_INLINE_SIZE);
+    assert!(size_of::<Result<Repr<Immutable>, ReserveError>>() == MAX_INLINE_SIZE);
+    assert!(size_of::<Result<Option<Repr<Immutable>>, ReserveError>>() == MAX_INLINE_SIZE);
     assert!(align_of::<Repr<Immutable>>() == align_of::<usize>());
     assert!(align_of::<Option<Repr<Immutable>>>() == align_of::<usize>());
+    assert!(align_of::<Result<Repr<Immutable>, ReserveError>>() == align_of::<usize>());
+    assert!(align_of::<Result<Option<Repr<Immutable>>, ReserveError>>() == align_of::<usize>());
 };
 
 // SAFETY: "true" and "false" are short enough (less than 8 bytes) to fit in InlineBuffer.
@@ -181,16 +189,34 @@ impl<M: Mutability> Repr<M> {
     }
 
     #[inline]
-    pub(crate) fn to_ascii_case(&self, mapping: CaseMapping) -> Result<Self, ReserveError> {
+    pub(crate) fn to_ascii_case(&self, case: Case) -> Result<Self, ReserveError> {
         let text = self.as_str();
-        if !case::changes_ascii(text.as_bytes(), mapping) {
+        let Some((unchanged, changed)) = case::split_at_first_ascii_change(text, case) else {
             return Ok(self.make_shallow_clone());
-        }
+        };
 
-        // SAFETY: `init` writes all `text.len()` bytes mapped from `text`. The ASCII case mapping
-        // maps an ASCII letter to an ASCII letter and leaves any other byte unchanged, so the
-        // result is valid UTF-8 like `text`.
-        unsafe { Repr::new_with(text.len(), |dst| case::map_ascii(text.as_bytes(), dst, mapping)) }
+        // SAFETY:
+        // - `dst` is `text.len()` bytes long, which is enough for `unchanged` and `changed`, and
+        //   a new buffer doesn't overlap `text`.
+        // - `init` writes all `text.len()` bytes: `unchanged` as is, followed by `changed` with
+        //   its ASCII letters converted to `case`, which keeps UTF-8 valid.
+        unsafe {
+            Repr::new_with(text.len(), |dst| {
+                let dst = dst.as_mut_ptr().cast::<u8>();
+
+                // copy `unchanged` as is
+                ptr::copy_nonoverlapping(unchanged.as_ptr(), dst, unchanged.len());
+
+                // write `changed` with its ASCII letters converted to `case`
+                let dst = dst.add(unchanged.len());
+                for (i, &b) in changed.as_bytes().iter().enumerate() {
+                    dst.add(i).write(match case {
+                        Case::Lower => b.to_ascii_lowercase(),
+                        Case::Upper => b.to_ascii_uppercase(),
+                    });
+                }
+            })
+        }
     }
 
     #[cfg(target_pointer_width = "64")]
@@ -466,38 +492,67 @@ impl Repr<Mutable> {
         }
     }
 
-    /// # Safety
-    ///
-    /// `init` must initialize the first `len` bytes of the slice it is given with valid UTF-8,
-    /// where `len` is the value it returns, and must not write uninitialized bytes to the slice.
-    pub(crate) unsafe fn with_capacity_init(
-        capacity: usize,
-        init: impl FnOnce(&mut [MaybeUninit<u8>]) -> usize,
-    ) -> Result<Self, ReserveError> {
-        if capacity <= MAX_INLINE_SIZE {
-            let mut buffer = InlineBuffer::empty();
-            // SAFETY: `buffer` holds `MAX_INLINE_SIZE` initialized bytes, and from `# Safety`,
-            // `init` keeps them initialized.
-            let dst =
-                unsafe { slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), MAX_INLINE_SIZE) };
-            let len = init(dst);
-            // SAFETY: From `# Safety`, `init` initialized `len <= MAX_INLINE_SIZE` bytes with
-            // valid UTF-8.
-            unsafe { buffer.set_len(len) };
-            Ok(Repr::from_inline(buffer))
-        } else {
-            let mut buffer = HeapBuffer::<Mutable>::with_capacity(capacity)?;
-            // SAFETY: `buffer` is allocated for `buffer.capacity()` bytes.
-            let dst = unsafe {
-                slice::from_raw_parts_mut(buffer.ptr().as_ptr().cast(), buffer.capacity())
-            };
-            let len = init(dst);
+    #[inline]
+    pub(crate) fn to_case(text: &str, case: Case) -> Result<Option<Self>, ReserveError> {
+        let Some((unchanged, changed)) = case::split_at_first_change(text, case) else {
+            return Ok(None);
+        };
+        let (ascii, rest) = case::split_ascii_prefix(changed);
+
+        let mut mapped = {
+            let mut mapped = Repr::with_capacity(text.len())?;
             // SAFETY:
-            // - From `# Safety`, `init` initialized `len <= capacity` bytes with valid UTF-8.
-            // - `buffer` was just created, so it is unique.
-            unsafe { buffer.set_len(len) };
-            Ok(Repr::from_heap(buffer))
+            // - `mapped` was just created with a capacity of `text.len()` bytes, which is enough
+            //   for `unchanged` and `ascii`. So it is not StaticBuffer, is unique if it is
+            //   HeapBuffer, and doesn't overlap `text`.
+            // - `unchanged` is copied as is, followed by `ascii` converted to `case`, which is
+            //   still ASCII. So the bytes up to the new length are valid UTF-8.
+            unsafe {
+                let dst = mapped.as_mut_ptr();
+
+                // copy `unchanged` as is
+                ptr::copy_nonoverlapping(unchanged.as_ptr(), dst, unchanged.len());
+
+                // write `ascii` converted to `case`
+                let dst = dst.add(unchanged.len());
+                for (i, &b) in ascii.as_bytes().iter().enumerate() {
+                    dst.add(i).write(match case {
+                        Case::Lower => b.to_ascii_lowercase(),
+                        Case::Upper => b.to_ascii_uppercase(),
+                    });
+                }
+
+                // set the length to cover the written bytes
+                mapped.set_len(unchanged.len() + ascii.len());
+            }
+            mapped
+        };
+
+        // push `rest` converted to `case`
+        for c in rest.chars() {
+            let pushed = match case {
+                Case::Lower if c == 'Σ' => {
+                    // SAFETY: `mapped` is not accessed again.
+                    unsafe { mapped.drop_in() };
+                    // Σ maps to σ, except at the end of a word where it maps to ς. The condition
+                    // (`Final_Sigma` in the Unicode Standard) depends on Unicode properties that
+                    // are not exposed by the standard library, so let it convert the whole string.
+                    return Repr::from_str(&text.to_lowercase()).map(Some);
+                }
+                Case::Lower => {
+                    c.to_lowercase().try_for_each(|l| mapped.push_str(l.encode_utf8(&mut [0; 4])))
+                }
+                Case::Upper => {
+                    c.to_uppercase().try_for_each(|u| mapped.push_str(u.encode_utf8(&mut [0; 4])))
+                }
+            };
+            if let Err(err) = pushed {
+                // SAFETY: `mapped` is not accessed again.
+                unsafe { mapped.drop_in() };
+                return Err(err);
+            }
         }
+        Ok(Some(mapped))
     }
 
     #[inline]
@@ -814,11 +869,11 @@ impl Repr<Mutable> {
     }
 
     #[inline]
-    pub(crate) fn make_ascii_case(&mut self, mapping: CaseMapping) -> Result<(), ReserveError> {
+    pub(crate) fn make_ascii_case(&mut self, case: Case) -> Result<(), ReserveError> {
         if self.is_static_buffer() || !self.is_unique() {
             // Copy and map in a single pass, rather than `ensure_modifiable` followed by the
             // in-place mapping below. This also keeps the buffer shared if no byte changes.
-            let mapped = self.to_ascii_case(mapping)?;
+            let mapped = self.to_ascii_case(case)?;
             self.replace_inner(mapped);
         } else {
             let len = self.len();
@@ -828,7 +883,10 @@ impl Repr<Mutable> {
             // - The ASCII case mapping maps an ASCII letter to an ASCII letter and leaves any
             //   other byte unchanged, so the buffer remains valid UTF-8.
             let bytes = unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), len) };
-            case::map_ascii_in_place(bytes, mapping);
+            match case {
+                Case::Lower => bytes.make_ascii_lowercase(),
+                Case::Upper => bytes.make_ascii_uppercase(),
+            }
         }
         Ok(())
     }
