@@ -1,5 +1,5 @@
 use lean_string::{LeanStr, LeanString, ToLeanStr, ToLeanString};
-use proptest::{prelude::*, property_test};
+use proptest::{prelude::*, property_test, sample::Index};
 
 #[property_test]
 #[cfg_attr(miri, ignore)]
@@ -293,6 +293,28 @@ fn repeat(#[strategy = ".{0,1000}"] input: String, #[strategy = 0..1000usize] n:
     let expected = input.repeat(n);
     prop_assert_eq!(LeanString::from(input.as_str()).repeat(n), expected.as_str());
     prop_assert_eq!(LeanStr::from(input.as_str()).repeat(n), expected.as_str());
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn replace_range(input: String, replace_with: String, start: Index, end: Index) {
+    let boundaries: Vec<usize> = (0..=input.len()).filter(|&i| input.is_char_boundary(i)).collect();
+    let start = boundaries[start.index(boundaries.len())];
+    let end = boundaries[end.index(boundaries.len())];
+    let range = start.min(end)..start.max(end);
+
+    let mut expected = input.clone();
+    expected.replace_range(range.clone(), &replace_with);
+
+    let mut unique = LeanString::from(input.as_str());
+    unique.replace_range(range.clone(), &replace_with);
+    prop_assert_eq!(unique, expected.as_str());
+
+    let mut shared = LeanString::from(input.as_str());
+    let cloned = shared.clone();
+    shared.replace_range(range, &replace_with);
+    prop_assert_eq!(shared, expected.as_str());
+    prop_assert_eq!(cloned, input);
 }
 
 // Arbitrary `String`s are mostly non-ASCII, so they rarely contain long ASCII runs, which case

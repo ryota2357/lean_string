@@ -1,7 +1,14 @@
 use super::ReserveError;
 use super::case::{self, Case};
 
-use core::{hint, marker::PhantomData, mem, mem::MaybeUninit, ptr, slice, str};
+use core::{
+    hint,
+    marker::PhantomData,
+    mem,
+    mem::MaybeUninit,
+    ops::{Bound, RangeBounds},
+    ptr, slice, str,
+};
 
 #[cfg(not(loom))]
 use core::sync::atomic::{Ordering::*, fence};
@@ -925,6 +932,90 @@ impl Repr<Mutable> {
             // and lastly resize the string
             self.set_len(new_len);
         }
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn replace_range(
+        &mut self,
+        range: impl RangeBounds<usize>,
+        replace_with: &str,
+    ) -> Result<(), ReserveError> {
+        let len = self.len();
+
+        // `usize::MAX` is never in bounds, so saturating keeps an overflowed bound out of bounds.
+        let start = match range.start_bound() {
+            Bound::Included(&start) => start,
+            Bound::Excluded(&start) => start.saturating_add(1),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&end) => end.saturating_add(1),
+            Bound::Excluded(&end) => end,
+            Bound::Unbounded => len,
+        };
+
+        let text = self.as_str();
+        assert!(
+            text.is_char_boundary(start),
+            "index is not a char boundary or out of bounds (index: {start})",
+        );
+        assert!(
+            text.is_char_boundary(end),
+            "index is not a char boundary or out of bounds (index: {end})",
+        );
+        assert!(start <= end, "range start is greater than end (start: {start}, end: {end})");
+
+        let removed_len = end - start;
+        let replace_len = replace_with.len();
+        if removed_len == 0 && replace_len == 0 {
+            // Nothing to change, and keep buffer as it is.
+            return Ok(());
+        }
+
+        // `len + replace_len` can't overflow: both are at most `isize::MAX`.
+        let new_len = len - removed_len + replace_len;
+
+        if self.is_static_buffer() || !self.is_unique() {
+            // Create new buffer.
+            // SAFETY:
+            // - `dst` is `new_len` bytes long, and the three `copy_nonoverlapping` initialize all of it.
+            // - The new buffer doesn't overlap `text` or `replace_with`.
+            // - `start <= end <= len`, so the source ranges are within `text`.
+            // - `start` and `end` are char boundaries, so the concatenation is valid UTF-8.
+            let replaced = unsafe {
+                Repr::new_with(new_len, |dst| {
+                    let dst = dst.as_mut_ptr().cast();
+                    let src = text.as_ptr();
+                    ptr::copy_nonoverlapping(src, dst, start);
+                    ptr::copy_nonoverlapping(replace_with.as_ptr(), dst.add(start), replace_len);
+                    ptr::copy_nonoverlapping(src.add(end), dst.add(start + replace_len), len - end);
+                })
+            }?;
+            self.replace_inner(replaced);
+            return Ok(());
+        }
+
+        // The buffer is InlineBuffer or a unique HeapBuffer here, so we can modify it in place.
+        if replace_len > removed_len {
+            self.reserve(replace_len - removed_len)?;
+        }
+
+        // SAFETY:
+        // - The buffer is neither StaticBuffer nor a shared HeapBuffer (checked above, and `reserve`
+        //   keeps it).
+        // - `ptr::copy` moves `data[end..len]` to `data[start + replace_len..new_len]`, both of which
+        //   are within the buffer.
+        // - `replace_with` doesn't overlap `data`.
+        // - `start` and `end` are char boundaries, so `0..new_len` is valid UTF-8 after the copies.
+        unsafe {
+            let data = self.as_mut_ptr();
+            // Move the suffix first so that writing `replace_with` never clobbers it.
+            ptr::copy(data.add(end), data.add(start + replace_len), len - end);
+            ptr::copy_nonoverlapping(replace_with.as_ptr(), data.add(start), replace_len);
+            self.set_len(new_len);
+        }
+
         Ok(())
     }
 

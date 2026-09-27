@@ -8,7 +8,12 @@
 // use std::ops::{Bound, RangeBounds};
 // use std::{assert_matches, panic, str};
 use lean_string::{LeanString, ToLeanString};
-use std::{borrow::Cow, panic};
+use std::{
+    borrow::Cow,
+    cell::Cell,
+    ops::{Bound, Bound::*, RangeBounds},
+    panic, str,
+};
 
 pub trait IntoCow<'a, B: ?Sized>
 where
@@ -613,127 +618,127 @@ fn test_from_iterator() {
 //     s.drain((Included(0), Included(usize::MAX)));
 // }
 
-// #[test]
-// fn test_replace_range() {
-//     let mut s = "Hello, world!".to_owned();
-//     s.replace_range(7..12, "世界");
-//     assert_eq!(s, "Hello, 世界!");
-// }
+#[test]
+fn test_replace_range() {
+    let mut s = LeanString::from("Hello, world!");
+    s.replace_range(7..12, "世界");
+    assert_eq!(s, "Hello, 世界!");
+}
 
-// #[test]
-// #[should_panic = "start of range should be a character boundary"]
-// fn test_replace_range_start_char_boundary() {
-//     let mut s = "Hello, 世界!".to_owned();
-//     s.replace_range(8.., "");
-// }
+#[test]
+#[should_panic = "index is not a char boundary or out of bounds (index: 8)"]
+fn test_replace_range_start_char_boundary() {
+    let mut s = LeanString::from("Hello, 世界!");
+    s.replace_range(8.., "");
+}
 
-// #[test]
-// #[should_panic = "end of range should be a character boundary"]
-// fn test_replace_range_end_char_boundary() {
-//     let mut s = "Hello, 世界!".to_owned();
-//     s.replace_range(..8, "");
-// }
+#[test]
+#[should_panic = "index is not a char boundary or out of bounds (index: 8)"]
+fn test_replace_range_end_char_boundary() {
+    let mut s = LeanString::from("Hello, 世界!");
+    s.replace_range(..8, "");
+}
 
-// #[test]
-// fn test_replace_range_inclusive_range() {
-//     let mut v = String::from("12345");
-//     v.replace_range(2..=3, "789");
-//     assert_eq!(v, "127895");
-//     v.replace_range(1..=2, "A");
-//     assert_eq!(v, "1A895");
-// }
+#[test]
+fn test_replace_range_inclusive_range() {
+    let mut v = LeanString::from("12345");
+    v.replace_range(2..=3, "789");
+    assert_eq!(v, "127895");
+    v.replace_range(1..=2, "A");
+    assert_eq!(v, "1A895");
+}
 
-// #[test]
-// #[should_panic = "range end index 6 out of range for slice of length 5"]
-// fn test_replace_range_out_of_bounds() {
-//     let mut s = String::from("12345");
-//     s.replace_range(5..6, "789");
-// }
+#[test]
+#[should_panic = "index is not a char boundary or out of bounds (index: 6)"]
+fn test_replace_range_out_of_bounds() {
+    let mut s = LeanString::from("12345");
+    s.replace_range(5..6, "789");
+}
 
-// #[test]
-// #[should_panic = "range end index 5 out of range for slice of length 5"]
-// fn test_replace_range_inclusive_out_of_bounds() {
-//     let mut s = String::from("12345");
-//     s.replace_range(5..=5, "789");
-// }
+#[test]
+#[should_panic = "index is not a char boundary or out of bounds (index: 6)"]
+fn test_replace_range_inclusive_out_of_bounds() {
+    let mut s = LeanString::from("12345");
+    s.replace_range(5..=5, "789");
+}
 
-// // The overflowed index value is target-dependent,
-// // so we don't check for its exact value in the panic message
-// #[test]
-// #[should_panic = "out of range for slice of length 3"]
-// fn test_replace_range_start_overflow() {
-//     let mut s = String::from("123");
-//     s.replace_range((Excluded(usize::MAX), Included(0)), "");
-// }
+// The overflowed index value is target-dependent,
+// so we don't check for its exact value in the panic message
+#[test]
+#[should_panic = "index is not a char boundary or out of bounds (index: "]
+fn test_replace_range_start_overflow() {
+    let mut s = LeanString::from("123");
+    s.replace_range((Excluded(usize::MAX), Included(0)), "");
+}
 
-// // The overflowed index value is target-dependent,
-// // so we don't check for its exact value in the panic message
-// #[test]
-// #[should_panic = "out of range for slice of length 3"]
-// fn test_replace_range_end_overflow() {
-//     let mut s = String::from("456");
-//     s.replace_range((Included(0), Included(usize::MAX)), "");
-// }
+// The overflowed index value is target-dependent,
+// so we don't check for its exact value in the panic message
+#[test]
+#[should_panic = "index is not a char boundary or out of bounds (index: "]
+fn test_replace_range_end_overflow() {
+    let mut s = LeanString::from("456");
+    s.replace_range((Included(0), Included(usize::MAX)), "");
+}
 
-// #[test]
-// fn test_replace_range_empty() {
-//     let mut s = String::from("12345");
-//     s.replace_range(1..2, "");
-//     assert_eq!(s, "1345");
-// }
+#[test]
+fn test_replace_range_empty() {
+    let mut s = LeanString::from("12345");
+    s.replace_range(1..2, "");
+    assert_eq!(s, "1345");
+}
 
-// #[test]
-// fn test_replace_range_unbounded() {
-//     let mut s = String::from("12345");
-//     s.replace_range(.., "");
-//     assert_eq!(s, "");
-// }
+#[test]
+fn test_replace_range_unbounded() {
+    let mut s = LeanString::from("12345");
+    s.replace_range(.., "");
+    assert_eq!(s, "");
+}
 
-// #[test]
-// fn test_replace_range_evil_start_bound() {
-//     struct EvilRange(Cell<bool>);
-//
-//     impl RangeBounds<usize> for EvilRange {
-//         fn start_bound(&self) -> Bound<&usize> {
-//             Bound::Included(if self.0.get() {
-//                 &1
-//             } else {
-//                 self.0.set(true);
-//                 &0
-//             })
-//         }
-//         fn end_bound(&self) -> Bound<&usize> {
-//             Bound::Unbounded
-//         }
-//     }
-//
-//     let mut s = String::from("🦀");
-//     s.replace_range(EvilRange(Cell::new(false)), "");
-//     assert_eq!(Ok(""), str::from_utf8(s.as_bytes()));
-// }
+#[test]
+fn test_replace_range_evil_start_bound() {
+    struct EvilRange(Cell<bool>);
 
-// #[test]
-// fn test_replace_range_evil_end_bound() {
-//     struct EvilRange(Cell<bool>);
-//
-//     impl RangeBounds<usize> for EvilRange {
-//         fn start_bound(&self) -> Bound<&usize> {
-//             Bound::Included(&0)
-//         }
-//         fn end_bound(&self) -> Bound<&usize> {
-//             Bound::Excluded(if self.0.get() {
-//                 &3
-//             } else {
-//                 self.0.set(true);
-//                 &4
-//             })
-//         }
-//     }
-//
-//     let mut s = String::from("🦀");
-//     s.replace_range(EvilRange(Cell::new(false)), "");
-//     assert_eq!(Ok(""), str::from_utf8(s.as_bytes()));
-// }
+    impl RangeBounds<usize> for EvilRange {
+        fn start_bound(&self) -> Bound<&usize> {
+            Bound::Included(if self.0.get() {
+                &1
+            } else {
+                self.0.set(true);
+                &0
+            })
+        }
+        fn end_bound(&self) -> Bound<&usize> {
+            Bound::Unbounded
+        }
+    }
+
+    let mut s = LeanString::from("🦀");
+    s.replace_range(EvilRange(Cell::new(false)), "");
+    assert_eq!(Ok(""), str::from_utf8(s.as_bytes()));
+}
+
+#[test]
+fn test_replace_range_evil_end_bound() {
+    struct EvilRange(Cell<bool>);
+
+    impl RangeBounds<usize> for EvilRange {
+        fn start_bound(&self) -> Bound<&usize> {
+            Bound::Included(&0)
+        }
+        fn end_bound(&self) -> Bound<&usize> {
+            Bound::Excluded(if self.0.get() {
+                &3
+            } else {
+                self.0.set(true);
+                &4
+            })
+        }
+    }
+
+    let mut s = LeanString::from("🦀");
+    s.replace_range(EvilRange(Cell::new(false)), "");
+    assert_eq!(Ok(""), str::from_utf8(s.as_bytes()));
+}
 
 // #[test]
 // fn test_replace_first() {

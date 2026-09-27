@@ -12,7 +12,7 @@ use core::{
     cmp, fmt,
     hash::{Hash, Hasher},
     mem,
-    ops::{Add, AddAssign, Deref},
+    ops::{Add, AddAssign, Deref, RangeBounds},
     str,
     str::FromStr,
 };
@@ -979,6 +979,58 @@ impl LeanString {
     #[inline]
     pub fn try_insert_str(&mut self, idx: usize, string: &str) -> Result<(), ReserveError> {
         self.0.insert_str(idx, string)
+    }
+
+    /// Removes the specified range in the [`LeanString`], and replaces it with the given string.
+    /// The given string doesn't need to be the same length as the range.
+    ///
+    /// # Panics
+    ///
+    /// Panics if **any** of the following conditions is met:
+    ///
+    /// 1. The starting point or end point do not lie on a [`char`] boundary, or they're out of
+    ///    bounds.
+    /// 2. The starting point is greater than the end point.
+    /// 3. The system is out-of-memory when cloning the [`LeanString`].
+    /// 4. The length of after replacing is greater than `2^56 - 1` on 64-bit architecture, or
+    ///    `2^31 - 16` on 32-bit architecture.
+    ///
+    /// For 3 and 4, if you want to handle such a problem manually, use
+    /// [`LeanString::try_replace_range()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut s = LeanString::from("α is alpha, β is beta");
+    /// let beta_offset = s.find('β').unwrap();
+    ///
+    /// // Replace the range up until the β from the string
+    /// s.replace_range(..beta_offset, "Α is capital alpha; ");
+    /// assert_eq!(s, "Α is capital alpha; β is beta");
+    /// ```
+    #[inline]
+    pub fn replace_range(&mut self, range: impl RangeBounds<usize>, replace_with: &str) {
+        self.try_replace_range(range, replace_with).unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanString::replace_range()`].
+    ///
+    /// This method won't panic if the system is out-of-memory, or the `capacity` becomes too large
+    /// by replacing the range, but return an [`ReserveError`]. Otherwise it behaves the same as
+    /// [`LeanString::replace_range()`].
+    ///
+    /// # Panics
+    ///
+    /// This method still panics if the starting point or end point do not lie on a [`char`]
+    /// boundary, if they're out of bounds, or if the starting point is greater than the end point.
+    #[inline]
+    pub fn try_replace_range(
+        &mut self,
+        range: impl RangeBounds<usize>,
+        replace_with: &str,
+    ) -> Result<(), ReserveError> {
+        self.0.replace_range(range, replace_with)
     }
 
     /// Creates a new [`LeanString`] by repeating `self` `n` times.

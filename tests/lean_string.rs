@@ -664,6 +664,61 @@ fn insert_fail() {
 }
 
 #[test]
+fn replace_range_inline_to_heap() {
+    let mut s = LeanString::from("0123");
+    assert!(!s.is_heap_allocated());
+    s.replace_range(1..3, "abcdefghijklmnopqrstuvwxyz");
+    assert_eq!(s, "0abcdefghijklmnopqrstuvwxyz3");
+    assert!(s.is_heap_allocated());
+}
+
+#[test]
+fn replace_range_cow() {
+    let mut heap = LeanString::from("qwer tyui opas dfgh jklz xcvb nm");
+    let cloned = heap.clone();
+    heap.replace_range(4.., "");
+    assert_eq!(heap, "qwer");
+    assert!(!heap.is_heap_allocated());
+    assert_eq!(cloned, "qwer tyui opas dfgh jklz xcvb nm");
+    assert!(cloned.is_heap_allocated());
+
+    // `replace_with` may point into the shared buffer itself.
+    let mut heap = cloned.clone();
+    heap.replace_range(..4, &cloned);
+    assert_eq!(heap, "qwer tyui opas dfgh jklz xcvb nm tyui opas dfgh jklz xcvb nm");
+    assert_eq!(cloned, "qwer tyui opas dfgh jklz xcvb nm");
+
+    let mut static_ = LeanString::from_static_str("01234567890123456789");
+    let cloned = static_.clone();
+    static_.replace_range(10..12, "a");
+    assert_eq!(static_, "0123456789a23456789");
+    assert!(static_.is_heap_allocated());
+    assert_eq!(cloned, "01234567890123456789");
+    assert!(!cloned.is_heap_allocated());
+}
+
+#[test]
+fn replace_range_nothing_keeps_buffer() {
+    let mut heap = LeanString::from("qwer tyui opas dfgh jklz xcvb nm");
+    let cloned = heap.clone();
+    heap.replace_range(3..3, "");
+    assert_eq!(heap.as_ptr(), cloned.as_ptr());
+
+    let text = "01234567890123456789";
+    let mut static_ = LeanString::from_static_str(text);
+    static_.replace_range(3..3, "");
+    assert_eq!(static_.as_ptr(), text.as_ptr());
+}
+
+#[test]
+#[should_panic(expected = "range start is greater than end (start: 3, end: 2)")]
+fn replace_range_start_greater_than_end() {
+    let mut s = LeanString::from("012345");
+    #[allow(clippy::reversed_empty_ranges)]
+    s.replace_range(3..2, "a");
+}
+
+#[test]
 fn repeat_around_inline() {
     let s = LeanString::from("a");
     assert!(!s.is_heap_allocated());
