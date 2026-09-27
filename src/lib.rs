@@ -133,7 +133,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::with_capacity()`].
     ///
-    /// This method won't panic if the system is out of memory, or if the `capacity` is too large, but
+    /// This method won't panic if the system is out-of-memory, or if the `capacity` is too large, but
     /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::with_capacity()`].
     #[inline]
     pub fn try_with_capacity(capacity: usize) -> Result<Self, ReserveError> {
@@ -444,7 +444,7 @@ impl LeanString {
         self.0.len()
     }
 
-    /// Returns `true` if the [`LeanString`] has a length of 0, `false` otherwise
+    /// Returns `true` if the [`LeanString`] has a length of zero, and `false` otherwise.
     ///
     /// # Examples
     ///
@@ -589,7 +589,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::reserve()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::reserve()`].
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::reserve()`].
     #[inline]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), ReserveError> {
         self.0.reserve(additional)
@@ -643,7 +643,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::shrink_to_fit()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::shrink_to_fit()`].
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::shrink_to_fit()`].
     #[inline]
     pub fn try_shrink_to_fit(&mut self) -> Result<(), ReserveError> {
         self.0.shrink_to(0)
@@ -688,7 +688,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::shrink_to()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::shrink_to()`].
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::shrink_to()`].
     #[inline]
     pub fn try_shrink_to(&mut self, min_capacity: usize) -> Result<(), ReserveError> {
         self.0.shrink_to(min_capacity)
@@ -719,7 +719,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::push()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::push()`].
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::push()`].
     #[inline]
     pub fn try_push(&mut self, ch: char) -> Result<(), ReserveError> {
         self.0.push_str(ch.encode_utf8(&mut [0; 4]))
@@ -758,7 +758,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::pop()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::pop()`].
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::pop()`].
     #[inline]
     pub fn try_pop(&mut self) -> Result<Option<char>, ReserveError> {
         self.0.pop()
@@ -789,7 +789,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::push_str()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// return an [`ReserveError`]. Otherwise it behaves the same as [`LeanString::push_str()`].
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::push_str()`].
     ///
     /// On failure, `self` is left unchanged because capacity is reserved before `string` is
     /// written.
@@ -843,7 +843,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::remove()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     /// Otherwise it behaves the same as [`LeanString::remove()`].
     ///
     /// # Panics
@@ -886,7 +886,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::retain()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     ///
     /// On error, `self` is left unchanged, but the `predicate` may already have been called on
     /// the characters up to and including the first one it rejected.
@@ -929,7 +929,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::insert()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` becomes too large
-    /// by inserting a character, but return an [`ReserveError`]. Otherwise it behaves the same as
+    /// by inserting a character, but returns a [`ReserveError`]. Otherwise it behaves the same as
     /// [`LeanString::insert()`].
     ///
     /// # Panics
@@ -969,7 +969,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::insert_str()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` becomes too large
-    /// by inserting a string slice, but return an [`ReserveError`]. Otherwise it behaves the same
+    /// by inserting a string slice, but returns a [`ReserveError`]. Otherwise it behaves the same
     /// as [`LeanString::insert_str()`].
     ///
     /// # Panics
@@ -1017,7 +1017,7 @@ impl LeanString {
     /// Fallible version of [`LeanString::replace_range()`].
     ///
     /// This method won't panic if the system is out-of-memory, or the `capacity` becomes too large
-    /// by replacing the range, but return an [`ReserveError`]. Otherwise it behaves the same as
+    /// by replacing the range, but returns a [`ReserveError`]. Otherwise it behaves the same as
     /// [`LeanString::replace_range()`].
     ///
     /// # Panics
@@ -1173,7 +1173,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::to_ascii_lowercase()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_lowercase(&self) -> Result<Self, ReserveError> {
         self.0.to_ascii_case(Case::Lower).map(LeanString)
@@ -1212,7 +1212,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::to_ascii_uppercase()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_uppercase(&self) -> Result<Self, ReserveError> {
         self.0.to_ascii_case(Case::Upper).map(LeanString)
@@ -1248,7 +1248,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::make_ascii_lowercase()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     #[inline]
     pub fn try_make_ascii_lowercase(&mut self) -> Result<(), ReserveError> {
         self.0.make_ascii_case(Case::Lower)
@@ -1284,7 +1284,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::make_ascii_uppercase()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     #[inline]
     pub fn try_make_ascii_uppercase(&mut self) -> Result<(), ReserveError> {
         self.0.make_ascii_case(Case::Upper)
@@ -1322,7 +1322,7 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::truncate()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     /// Otherwise it behaves the same as [`LeanString::truncate()`].
     ///
     /// # Panics
@@ -1391,21 +1391,21 @@ impl LeanString {
     ///
     /// ```
     /// # use lean_string::LeanString;
-    /// let mut s = LeanString::from("This is a example of unique LeanString");
-    /// assert_eq!(s.capacity(), 38);
+    /// let mut s = LeanString::from("This is an example of unique LeanString");
+    /// assert_eq!(s.capacity(), 39);
     ///
     /// s.clear();
     ///
     /// assert_eq!(s, "");
-    /// assert_eq!(s.capacity(), 38);
+    /// assert_eq!(s.capacity(), 39);
     /// ```
     ///
     /// ## not unique
     ///
     /// ```
     /// # use lean_string::LeanString;
-    /// let mut s = LeanString::from("This is a example of not unique LeanString");
-    /// assert_eq!(s.capacity(), 42);
+    /// let mut s = LeanString::from("This is an example of not unique LeanString");
+    /// assert_eq!(s.capacity(), 43);
     ///
     /// let s2 = s.clone();
     /// s.clear();
@@ -1453,7 +1453,7 @@ impl LeanString {
     /// Returns the underlying `&'static str` if this [`LeanString`] holds one, or `None` otherwise.
     ///
     /// Note that strings short enough to be inlined into the local storage will return `None`, even
-    /// if if created with [`LeanString::from_static_str`]
+    /// if created with [`LeanString::from_static_str`].
     ///
     /// # Examples
     ///
@@ -1945,7 +1945,7 @@ impl LeanStr {
     /// Returns the underlying `&'static str` if this [`LeanStr`] holds one, or `None` otherwise.
     ///
     /// Note that strings short enough to be inlined into the local storage will return `None`, even
-    /// if if created with [`LeanStr::from_static_str`]
+    /// if created with [`LeanStr::from_static_str`].
     ///
     /// # Examples
     ///
@@ -2106,7 +2106,7 @@ impl LeanStr {
 
     /// Fallible version of [`LeanStr::to_ascii_lowercase()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_lowercase(&self) -> Result<Self, ReserveError> {
         self.0.to_ascii_case(Case::Lower).map(LeanStr)
@@ -2140,7 +2140,7 @@ impl LeanStr {
 
     /// Fallible version of [`LeanStr::to_ascii_uppercase()`].
     ///
-    /// This method won't panic if the system is out-of-memory, but return an [`ReserveError`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
     #[inline]
     pub fn try_to_ascii_uppercase(&self) -> Result<Self, ReserveError> {
         self.0.to_ascii_case(Case::Upper).map(LeanStr)

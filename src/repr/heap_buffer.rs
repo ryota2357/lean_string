@@ -129,9 +129,9 @@ impl<H: Header> HeapBuffer<H> {
         let buffer = unsafe { Self::new_uninit(text.len()) }?;
 
         // SAFETY:
-        // - src (`text`) and dst (`buffer.ptr`) is valid for `text.len()` bytes because
+        // - src (`text`) and dst (`buffer.ptr`) are valid for `text.len()` bytes because
         //   `new_uninit` allocated at least `text.len()` bytes.
-        // - Both src and dst is aligned for u8.
+        // - Both src and dst are aligned for u8.
         // - src and dst don't overlap because we allocated dst just now.
         unsafe { ptr::copy_nonoverlapping(text.as_ptr(), buffer.ptr.as_ptr(), text.len()) };
 
@@ -367,10 +367,10 @@ impl HeapBuffer<GrowableHeader> {
         }
 
         // SAFETY:
-        // - src (`text`) and dst (`ptr`) is valid for `text_len` bytes because `text_len` comes
+        // - src (`text`) and dst (`ptr`) are valid for `text_len` bytes because `text_len` comes
         //   from `text`, and `ptr` was allocated to be at least `new_capacity` bytes, which is
         //   greater than `text_len`.
-        // - Both src and dst is aligned for u8.
+        // - Both src and dst are aligned for u8.
         // - src and dst don't overlap because we allocated dst just now.
         unsafe { ptr::copy_nonoverlapping(text.as_ptr(), ptr.as_ptr(), text_len) };
 

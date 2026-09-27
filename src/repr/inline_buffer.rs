@@ -91,7 +91,7 @@ impl InlineBuffer {
         // SAFETY:
         // - Every copy stays within `0..len`, for which src (`text`) is valid, and dst (`buffer`)
         //   is valid because `len <= MAX_INLINE_SIZE`.
-        // - Both src and dst is aligned for u8.
+        // - Both src and dst are aligned for u8.
         // - src and dst don't overlap because we created dst.
         unsafe {
             let src = text.as_ptr();
