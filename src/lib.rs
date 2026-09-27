@@ -2562,6 +2562,8 @@ impl From<&String> for LeanStr {
 }
 
 impl From<Cow<'_, str>> for LeanString {
+    #[inline]
+    #[track_caller]
     fn from(cow: Cow<str>) -> Self {
         match cow {
             Cow::Borrowed(s) => s.into(),
@@ -2571,6 +2573,8 @@ impl From<Cow<'_, str>> for LeanString {
 }
 
 impl From<Cow<'_, str>> for LeanStr {
+    #[inline]
+    #[track_caller]
     fn from(cow: Cow<str>) -> Self {
         match cow {
             Cow::Borrowed(s) => s.into(),
