@@ -1,4 +1,5 @@
 use lean_string::LeanString;
+use std::borrow::Cow;
 
 const INLINE_LIMIT: usize = size_of::<LeanString>();
 
@@ -134,6 +135,12 @@ fn from_static_str_around_inline_limit() {
     assert_eq!(static_, s[..INLINE_LIMIT + 1]);
     assert!(!static_.is_heap_allocated());
     assert_eq!(static_.capacity(), INLINE_LIMIT + 1);
+}
+
+#[test]
+fn into_cow_borrows_static() {
+    let s = LeanString::from_static_str("A static str that is longer than inline limit");
+    assert!(matches!(Cow::from(s), Cow::Borrowed(_)));
 }
 
 #[test]

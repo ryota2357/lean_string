@@ -59,6 +59,17 @@ fn static_str_to_string() {
 }
 
 #[test]
+fn static_ref_conversion_keeps_static() {
+    let text: &'static str = "A static str that is longer than inline limit";
+
+    let lean_string = LeanString::from_static_str(text);
+    assert!(LeanStr::from(&lean_string).as_static_str().is_some());
+
+    let lean_str = LeanStr::from_static_str(text);
+    assert!(LeanString::from(&lean_str).as_static_str().is_some());
+}
+
+#[test]
 fn unique_heap_string_to_str() {
     let text = "a heap-allocated string, longer than the inline limit";
 

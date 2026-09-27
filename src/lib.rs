@@ -2529,6 +2529,22 @@ impl From<&str> for LeanStr {
     }
 }
 
+impl From<&mut str> for LeanString {
+    #[inline]
+    #[track_caller]
+    fn from(value: &mut str) -> Self {
+        LeanString(Repr::from_str(value).unwrap_with_msg())
+    }
+}
+
+impl From<&mut str> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: &mut str) -> Self {
+        LeanStr(Repr::from_str(value).unwrap_with_msg())
+    }
+}
+
 impl From<String> for LeanString {
     #[inline]
     #[track_caller]
@@ -2641,6 +2657,40 @@ impl From<&LeanStr> for String {
     }
 }
 
+impl<'a> From<LeanString> for Cow<'a, str> {
+    #[inline]
+    fn from(value: LeanString) -> Self {
+        match value.as_static_str() {
+            Some(s) => Cow::Borrowed(s),
+            None => Cow::Owned(value.into()),
+        }
+    }
+}
+
+impl<'a> From<LeanStr> for Cow<'a, str> {
+    #[inline]
+    fn from(value: LeanStr) -> Self {
+        match value.as_static_str() {
+            Some(s) => Cow::Borrowed(s),
+            None => Cow::Owned(value.into()),
+        }
+    }
+}
+
+impl<'a> From<&'a LeanString> for Cow<'a, str> {
+    #[inline]
+    fn from(value: &'a LeanString) -> Self {
+        Cow::Borrowed(value.as_str())
+    }
+}
+
+impl<'a> From<&'a LeanStr> for Cow<'a, str> {
+    #[inline]
+    fn from(value: &'a LeanStr) -> Self {
+        Cow::Borrowed(value.as_str())
+    }
+}
+
 impl From<LeanString> for LeanStr {
     #[inline]
     #[track_caller]
@@ -2654,6 +2704,22 @@ impl From<LeanStr> for LeanString {
     #[track_caller]
     fn from(value: LeanStr) -> Self {
         value.into_lean_string()
+    }
+}
+
+impl From<&LeanString> for LeanStr {
+    #[inline]
+    #[track_caller]
+    fn from(value: &LeanString) -> Self {
+        value.clone().into_lean_str()
+    }
+}
+
+impl From<&LeanStr> for LeanString {
+    #[inline]
+    #[track_caller]
+    fn from(value: &LeanStr) -> Self {
+        value.clone().into_lean_string()
     }
 }
 
