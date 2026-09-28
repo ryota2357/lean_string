@@ -489,6 +489,23 @@ impl<M: Mutability> Repr<M> {
     }
 }
 
+macro_rules! outline {
+    // NOTE: `self` is taken from the call site as `$recv`, because a `self` written here would not
+    //       refer to the caller's `self` due to macro hygiene.
+    (($this:ident = $recv:ident : $self_ty:ty $(, $var:ident : $ty:ty)* $(,)?) $(: $ret:ty)? $body:block) => {{
+        #[cold]
+        #[inline(never)]
+        fn outlined_impl($this: $self_ty, $($var: $ty),*) $(-> $ret)? $body
+        outlined_impl($recv, $($var),*)
+    }};
+    (($($var:ident : $ty:ty),* $(,)?) $(: $ret:ty)? $body:block) => {{
+        #[cold]
+        #[inline(never)]
+        fn outlined_impl($($var: $ty),*) $(-> $ret)? $body
+        outlined_impl($($var),*)
+    }};
+}
+
 impl Repr<Mutable> {
     #[inline]
     pub(crate) fn with_capacity(capacity: usize) -> Result<Self, ReserveError> {
@@ -636,7 +653,9 @@ impl Repr<Mutable> {
         let str_len = string.len();
 
         if self.spare_capacity() < str_len || !self.is_modifiable() {
-            self.grow_amortized(str_len)?;
+            outline!((this = self: &mut Repr<Mutable>, str_len: usize): Result<(), ReserveError> {
+                this.grow_amortized(str_len)
+            })?;
         }
 
         // SAFETY:
@@ -831,7 +850,9 @@ impl Repr<Mutable> {
         let str_len = string.len();
 
         if self.spare_capacity() < str_len || !self.is_modifiable() {
-            self.grow_amortized(str_len)?;
+            outline!((this = self: &mut Repr<Mutable>, str_len: usize): Result<(), ReserveError> {
+                this.grow_amortized(str_len)
+            })?;
         }
 
         // SAFETY:
@@ -917,7 +938,9 @@ impl Repr<Mutable> {
         // The buffer is InlineBuffer or a unique HeapBuffer here, so we can modify it in place.
         let additional = replace_len.saturating_sub(removed_len);
         if self.spare_capacity() < additional {
-            self.grow_amortized(additional)?;
+            outline!((this = self: &mut Repr<Mutable>, additional: usize): Result<(), ReserveError> {
+                this.grow_amortized(additional)
+            })?;
         }
 
         // SAFETY:
