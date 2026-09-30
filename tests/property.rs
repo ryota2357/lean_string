@@ -297,6 +297,23 @@ fn repeat(#[strategy = ".{0,1000}"] input: String, #[strategy = 0..1000usize] n:
 
 #[property_test]
 #[cfg_attr(miri, ignore)]
+fn push(input: String, ch: char) {
+    let mut expected = input.clone();
+    expected.push(ch);
+
+    let mut unique = LeanString::from(input.as_str());
+    unique.push(ch);
+    prop_assert_eq!(unique, expected.as_str());
+
+    let mut shared = LeanString::from(input.as_str());
+    let cloned = shared.clone();
+    shared.push(ch);
+    prop_assert_eq!(shared, expected.as_str());
+    prop_assert_eq!(cloned, input);
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
 fn replace_range(input: String, replace_with: String, start: Index, end: Index) {
     let boundaries: Vec<usize> = (0..=input.len()).filter(|&i| input.is_char_boundary(i)).collect();
     let start = boundaries[start.index(boundaries.len())];

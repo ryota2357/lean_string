@@ -776,7 +776,7 @@ impl LeanString {
     /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::push()`].
     #[inline]
     pub fn try_push(&mut self, ch: char) -> Result<(), ReserveError> {
-        self.0.push_str(ch.encode_utf8(&mut [0; 4]))
+        self.0.push_char(ch)
     }
 
     /// Removes the last character from the [`LeanString`] and returns it.
@@ -2849,7 +2849,7 @@ impl FromIterator<char> for LeanString {
         let mut buf = LeanString::try_with_capacity(lower_bound).unwrap_or_default();
 
         for ch in iter {
-            buf.push_str(ch.encode_utf8(&mut [0; 4]));
+            buf.push(ch);
         }
         buf
     }

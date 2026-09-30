@@ -546,12 +546,8 @@ impl Repr<Mutable> {
                     // are not exposed by the standard library, so let it convert the whole string.
                     return Repr::from_str(&text.to_lowercase()).map(Some);
                 }
-                Case::Lower => {
-                    c.to_lowercase().try_for_each(|l| mapped.push_str(l.encode_utf8(&mut [0; 4])))
-                }
-                Case::Upper => {
-                    c.to_uppercase().try_for_each(|u| mapped.push_str(u.encode_utf8(&mut [0; 4])))
-                }
+                Case::Lower => c.to_lowercase().try_for_each(|l| mapped.push_char(l)),
+                Case::Upper => c.to_uppercase().try_for_each(|u| mapped.push_char(u)),
             };
             if let Err(err) = pushed {
                 // SAFETY: `mapped` is not accessed again.
@@ -650,6 +646,44 @@ impl Repr<Mutable> {
             let data = self.as_mut_ptr();
             ptr::copy_nonoverlapping(string.as_ptr(), data.add(len), str_len);
             self.set_len(len + str_len);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn push_char(&mut self, ch: char) -> Result<(), ReserveError> {
+        let len = self.len();
+        let ch_len = ch.len_utf8();
+
+        if self.spare_capacity() < ch_len || !self.is_modifiable() {
+            self.grow_amortized(ch_len)?;
+        }
+
+        // A `copy_nonoverlapping` with a runtime length emits a `memcpy` call. Constant-size copies
+        // let the optimizer keep `buf` in registers and store it with a single instruction or two.
+        // Matching on `encoded.len()` rather than `ch_len` lets it merge the branches of
+        // `encode_utf8` with those of the `match`.
+        //
+        // SAFETY:
+        // - The buffer is modifiable and has `ch_len` bytes of spare capacity, which the condition
+        //   above or `grow_amortized` ensures.
+        // - `encoded` lives in the local `buf`, so it doesn't overlap the buffer.
+        // - `encoded` is the `ch_len`-byte UTF-8 encoding of `ch`, so after the copy,
+        //   `0..(len + ch_len)` is initialized with valid UTF-8.
+        unsafe {
+            let dst = self.as_mut_ptr().add(len);
+            let mut buf = [0; 4];
+            let encoded = ch.encode_utf8(&mut buf);
+            let src = encoded.as_ptr();
+            match encoded.len() {
+                1 => ptr::copy_nonoverlapping(src, dst, 1),
+                2 => ptr::copy_nonoverlapping(src, dst, 2),
+                3 => ptr::copy_nonoverlapping(src, dst, 3),
+                4 => ptr::copy_nonoverlapping(src, dst, 4),
+                _ => hint::unreachable_unchecked(),
+            }
+            self.set_len(len + ch_len);
         }
 
         Ok(())

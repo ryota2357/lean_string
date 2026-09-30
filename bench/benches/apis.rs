@@ -118,6 +118,31 @@ fn reserve(c: &mut Criterion) {
     group.finish();
 }
 
+fn push(c: &mut Criterion) {
+    let mut group = c.benchmark_group("push");
+    for ch in ['a', 'é', 'あ', '🦀'] {
+        let ch_len = ch.len_utf8();
+        duplicate! {
+            [
+                label         StrTy;
+                ["current"]   [lean_string::LeanString];
+                ["prev"]      [lean_string_prev::LeanString];
+                ["std"]       [String];
+            ]
+            group.bench_with_input(BenchmarkId::new(label, ch_len), &ch_len, |b, _| {
+                b.iter(|| {
+                    let mut s = StrTy::new();
+                    for _ in 0..black_box(16) {
+                        s.push(black_box(ch));
+                    }
+                    s
+                })
+            });
+        }
+    }
+    group.finish();
+}
+
 fn push_str(c: &mut Criterion) {
     let mut group = c.benchmark_group("push_str");
     duplicate! {
@@ -287,6 +312,7 @@ criterion_group!(
     to_lean_string,
     clone,
     reserve,
+    push,
     push_str,
     push_str_after_clone,
     as_str,
