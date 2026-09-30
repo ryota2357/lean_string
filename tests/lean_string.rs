@@ -185,6 +185,25 @@ fn reserve_on_heap() {
 }
 
 #[test]
+fn modifying_short_shared_heap_moves_to_inline() {
+    let text = "a text that is longer than the inline limit";
+
+    let mut removed = LeanString::from(text);
+    let _shared = removed.clone();
+    removed.truncate(3);
+    removed.remove(0);
+    assert_eq!(removed, " t");
+    assert!(!removed.is_heap_allocated());
+
+    let mut reserved = LeanString::from(text);
+    let _shared = reserved.clone();
+    reserved.truncate(3);
+    reserved.reserve(1);
+    assert_eq!(reserved, "a t");
+    assert!(!reserved.is_heap_allocated());
+}
+
+#[test]
 fn shrink_to_inline_buffer() {
     let mut inline = LeanString::from("Hello");
     assert!(!inline.is_heap_allocated());

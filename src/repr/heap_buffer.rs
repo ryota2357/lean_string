@@ -14,14 +14,6 @@ use loom::sync::atomic::AtomicUsize;
 
 use internal::*;
 
-/// [`HeapBuffer`] grows at an amortized rates of 1.5x
-#[inline(always)]
-pub(crate) fn amortized_growth(cur_len: usize, additional: usize) -> usize {
-    let required = cur_len.saturating_add(additional);
-    let amortized = cur_len.saturating_mul(3) / 2;
-    amortized.max(required)
-}
-
 #[repr(C)]
 pub struct HeapBuffer<H: Header> {
     // 64-bit architecture or 32-bit architecture if `is_len_heap_layout` is false:
@@ -333,15 +325,19 @@ impl HeapBuffer<GrowableHeader> {
         Ok(HeapBuffer { ptr, len, _header: PhantomData })
     }
 
-    pub(super) fn with_exact_capacity(text: &str, capacity: usize) -> Result<Self, ReserveError> {
-        if text.len() > capacity {
-            return Err(ReserveError);
-        }
+    /// # Safety
+    ///
+    /// `capacity` must be greater than or equal to `text.len()`.
+    pub(super) unsafe fn from_str_with_capacity(
+        text: &str,
+        capacity: usize,
+    ) -> Result<Self, ReserveError> {
+        debug_assert!(text.len() <= capacity);
 
         let mut buffer = HeapBuffer::with_capacity(capacity)?;
 
         // SAFETY:
-        // - `buffer` is uniquely owned and has enough capacity for `text`.
+        // - `buffer` is uniquely owned, and has enough capacity for `text` from `# Safety`.
         // - `text` contains valid UTF-8 and does not overlap the new allocation.
         unsafe {
             ptr::copy_nonoverlapping(text.as_ptr(), buffer.ptr.as_ptr(), text.len());
@@ -349,32 +345,6 @@ impl HeapBuffer<GrowableHeader> {
         }
 
         Ok(buffer)
-    }
-
-    pub(super) fn with_additional(text: &str, additional: usize) -> Result<Self, ReserveError> {
-        let text_len = text.len();
-
-        let len = TextLen::new(text_len)?;
-        let ptr = Self::allocate_ptr(amortized_growth(text_len, additional))?;
-
-        if len.is_heap() {
-            // SAFETY: Since the `new_capacity` is greater than or equal to `text_len`, `ptr` is
-            // allocated with enough space to store the length.
-            unsafe {
-                let len_ptr = ptr.sub(Self::header_offset()).sub(size_of::<usize>());
-                ptr::write(len_ptr.as_ptr().cast(), text_len);
-            }
-        }
-
-        // SAFETY:
-        // - src (`text`) and dst (`ptr`) are valid for `text_len` bytes because `text_len` comes
-        //   from `text`, and `ptr` was allocated to be at least `new_capacity` bytes, which is
-        //   greater than `text_len`.
-        // - Both src and dst are aligned for u8.
-        // - src and dst don't overlap because we allocated dst just now.
-        unsafe { ptr::copy_nonoverlapping(text.as_ptr(), ptr.as_ptr(), text_len) };
-
-        Ok(HeapBuffer { ptr, len, _header: PhantomData })
     }
 
     pub(super) fn capacity(&self) -> usize {
@@ -396,13 +366,12 @@ impl HeapBuffer<GrowableHeader> {
             (false, false) => false,
             (true, true) => true,
             (true, false) | (false, true) => {
-                let str = self.as_str();
-                let mut new_buf = HeapBuffer::with_capacity(new_capacity.as_usize())?;
-                unsafe {
-                    ptr::copy_nonoverlapping(str.as_ptr(), new_buf.ptr.as_ptr(), str.len());
-                    new_buf.set_len(str.len());
-                    self.dealloc();
-                }
+                // SAFETY: From `# Safety`, `new_capacity` is not less than the length.
+                let new_buf = unsafe {
+                    HeapBuffer::from_str_with_capacity(self.as_str(), new_capacity.as_usize())
+                }?;
+                // SAFETY: `self` is unique, and overwritten immediately below.
+                unsafe { self.dealloc() };
                 *self = new_buf;
                 return Ok(());
             }

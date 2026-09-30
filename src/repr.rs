@@ -575,103 +575,29 @@ impl Repr<Mutable> {
         }
     }
 
-    /// Reserves capacity for at least `additional` more bytes.
-    ///
-    /// Does nothing if `additional` is zero. Otherwise, on `Ok`, this method ensures:
-    ///
-    /// - The buffer is not StaticBuffer.
-    /// - If the buffer is HeapBuffer, it must be unique.
+    #[inline]
+    fn spare_capacity(&self) -> usize {
+        if self.is_heap_buffer() {
+            // SAFETY: We just checked the discriminant to make sure we're heap allocated
+            unsafe { self.as_heap_buffer() }.capacity() - self.len()
+        } else if self.is_static_buffer() {
+            // StaticBuffer is always full.
+            0
+        } else {
+            MAX_INLINE_SIZE - self.len()
+        }
+    }
+
     #[inline]
     pub(crate) fn reserve(&mut self, additional: usize) -> Result<(), ReserveError> {
         if additional == 0 {
+            // keep shared or static buffer.
             return Ok(());
         }
-
-        let len = self.len();
-        let needed_capacity = len.checked_add(additional).ok_or(ReserveError)?;
-
-        macro_rules! outline {
-            (($this:ident = self : $self_ty:ty $(, $var:ident : $ty:ty)* $(,)?) $(: $ret:ty)? $body:block) => {{
-                #[cold]
-                #[inline(never)]
-                fn outlined_impl($this: $self_ty, $($var: $ty),*) $(-> $ret)? $body
-                outlined_impl(self, $($var),*)
-            }};
-            (($($var:ident : $ty:ty),* $(,)?) $(: $ret:ty)? $body:block) => {{
-                #[cold]
-                #[inline(never)]
-                fn outlined_impl($($var: $ty),*) $(-> $ret)? $body
-                outlined_impl($($var),*)
-            }};
+        if self.spare_capacity() < additional || !self.is_modifiable() {
+            self.grow_amortized(additional)?;
         }
-
-        if self.is_heap_buffer() {
-            // SAFETY: We just checked that `self` is HeapBuffer
-            let heap = unsafe { self.as_heap_buffer_mut() };
-
-            if heap.is_unique() {
-                if heap.capacity() >= needed_capacity {
-                    // No need to reserve more capacity.
-                    return Ok(());
-                }
-
-                outline!((heap: &mut HeapBuffer<Mutable>, len: usize, additional: usize): Result<(), ReserveError> {
-                    let amortized_capacity = heap_buffer::amortized_growth(len, additional);
-                    // SAFETY:
-                    // - `heap` is unique (verified by `is_unique()`).
-                    // - `amortized_capacity` is greater than `len`.
-                    unsafe { heap.realloc(amortized_capacity) }
-                })
-            } else {
-                // The heap is shared. We must read the data while our reference is still live
-                // (ref count unchanged), then create a new independent buffer.
-
-                outline!((this = self: &mut Repr<Mutable>, additional: usize): Result<(), ReserveError> {
-                    // NOTE: We want to make this args for `outline!`, but `this` is a mutable reference so we can't do that.
-                    // SAFETY: `this` is comes from `self`, we checked `self` is HeapBuffer.
-                    let heap = unsafe { this.as_heap_buffer_mut() };
-
-                    let str = heap.as_str();
-                    let new_heap = HeapBuffer::<Mutable>::with_additional(str, additional)?;
-                    // Release our reference only after the copy is complete. If the allocation above
-                    // fails, ref count remains untouched (no leak).
-                    // SAFETY: `this` is overwritten immediately below and `heap` is not accessed again.
-                    unsafe { heap.release() };
-                    *this = Repr::from_heap(new_heap);
-                    Ok(())
-                })
-            }
-        } else if self.is_static_buffer() {
-            // We can't modify it, need to convert to other buffer.
-
-            if needed_capacity <= MAX_INLINE_SIZE {
-                outline!((this = self: &mut Repr<Mutable>): Result<(), ReserveError> {
-                    // SAFETY: `len <= needed_capacity <= MAX_INLINE_SIZE`
-                    let inline = unsafe { InlineBuffer::new(this.as_str()) };
-                    *this = Repr::from_inline(inline);
-                    Ok(())
-                })
-            } else {
-                outline!((this = self: &mut Repr<Mutable>, additional: usize): Result<(), ReserveError> {
-                    let heap = HeapBuffer::<Mutable>::with_additional(this.as_str(), additional)?;
-                    *this = Repr::from_heap(heap);
-                    Ok(())
-                })
-            }
-        } else {
-            // self is InlineBuffer
-
-            if needed_capacity > MAX_INLINE_SIZE {
-                outline!((this = self: &mut Repr<Mutable>, additional: usize): Result<(), ReserveError> {
-                    let heap = HeapBuffer::<Mutable>::with_additional(this.as_str(), additional)?;
-                    *this = Repr::from_heap(heap);
-                    Ok(())
-                })
-            } else {
-                // We have enough capacity, no need to reserve.
-                Ok(())
-            }
-        }
+        Ok(())
     }
 
     #[inline]
@@ -703,7 +629,9 @@ impl Repr<Mutable> {
         } else {
             // We need to create a new buffer because the current buffer is shared with others.
             let str = heap.as_str();
-            let new_heap = HeapBuffer::<Mutable>::with_exact_capacity(str, new_capacity)?;
+            // SAFETY: `new_capacity` is not less than the length.
+            let new_heap =
+                unsafe { HeapBuffer::<Mutable>::from_str_with_capacity(str, new_capacity) }?;
             // SAFETY: `self` is overwritten immediately below and `heap` is not accessed again.
             unsafe { heap.release() };
             *self = Repr::from_heap(new_heap);
@@ -715,23 +643,23 @@ impl Repr<Mutable> {
     #[inline]
     pub(crate) fn push_str(&mut self, string: &str) -> Result<(), ReserveError> {
         if string.is_empty() {
+            // Nothing to write, and keep a shared or static buffer as it is.
             return Ok(());
         }
         let len = self.len();
         let str_len = string.len();
 
-        self.reserve(str_len)?;
+        if self.spare_capacity() < str_len || !self.is_modifiable() {
+            self.grow_amortized(str_len)?;
+        }
 
         // SAFETY:
-        // by calling `self.reserve()` with `str_len > 0` (`string` is not empty):
-        // - We have reserved enough capacity.
-        // - The buffer is not StaticBuffer.
-        // - If the buffer is HeapBuffer, it must be unique.
-        // The source and destination don't overlap: any shared heap buffer was copied by
-        // `reserve`, and safe Rust can't borrow the same unique buffer as both `&mut self` and
-        // `string`.
-        // After `copy_nonoverlapping`:
-        // - `0..(len + str_len)` is initialized.
+        // - The buffer is modifiable and has `str_len` bytes of spare capacity, which the condition
+        //   above or `grow_amortized` ensures.
+        // - The source and destination don't overlap: a shared heap buffer was copied by
+        //   `grow_amortized`, and safe Rust can't borrow the same unique buffer as both
+        //   `&mut self` and `string`.
+        // - After `copy_nonoverlapping`, `0..(len + str_len)` is initialized with valid UTF-8.
         unsafe {
             let data = self.as_mut_ptr();
             ptr::copy_nonoverlapping(string.as_ptr(), data.add(len), str_len);
@@ -877,7 +805,7 @@ impl Repr<Mutable> {
 
     #[inline]
     pub(crate) fn make_ascii_case(&mut self, case: Case) -> Result<(), ReserveError> {
-        if self.is_static_buffer() || !self.is_unique() {
+        if !self.is_modifiable() {
             // Copy and map in a single pass, rather than `ensure_modifiable` followed by the
             // in-place mapping below. This also keeps the buffer shared if no byte changes.
             let mapped = self.to_ascii_case(case)?;
@@ -905,32 +833,33 @@ impl Repr<Mutable> {
             "index is not a char boundary or out of bounds (index: {idx})",
         );
 
-        // Nothing to write, and `reserve(0)` below would not make the buffer modifiable.
+        // Nothing to write, and keep a shared or static buffer as it is.
         if string.is_empty() {
             return Ok(());
         }
 
-        let new_len = self.len().checked_add(string.len()).ok_or(ReserveError)?;
+        let len = self.len();
+        let str_len = string.len();
 
-        // reserve makes self unique and modifiable because `string.len() > 0`
-        self.reserve(string.len())?;
-        debug_assert!(self.is_unique());
-        debug_assert!(!self.is_static_buffer());
+        if self.spare_capacity() < str_len || !self.is_modifiable() {
+            self.grow_amortized(str_len)?;
+        }
 
         // SAFETY:
         // - We contracted that we can split self at `idx`.
-        // - We just reserved enough capacity and set length after reserving.
+        // - The buffer is modifiable and has `str_len` bytes of spare capacity, which the condition
+        //   above or `grow_amortized` ensures.
         // - The gap is filled by valid UTF-8 bytes.
         unsafe {
             // first move the tail to the new back
             let data = self.as_mut_ptr();
-            ptr::copy(data.add(idx), data.add(idx + string.len()), new_len - idx - string.len());
+            ptr::copy(data.add(idx), data.add(idx + str_len), len - idx);
 
             // then insert the new bytes
-            ptr::copy_nonoverlapping(string.as_ptr(), data.add(idx), string.len());
+            ptr::copy_nonoverlapping(string.as_ptr(), data.add(idx), str_len);
 
             // and lastly resize the string
-            self.set_len(new_len);
+            self.set_len(len + str_len);
         }
         Ok(())
     }
@@ -976,7 +905,7 @@ impl Repr<Mutable> {
         // `len + replace_len` can't overflow: both are at most `isize::MAX`.
         let new_len = len - removed_len + replace_len;
 
-        if self.is_static_buffer() || !self.is_unique() {
+        if !self.is_modifiable() {
             // Create new buffer.
             // SAFETY:
             // - `dst` is `new_len` bytes long, and the three `copy_nonoverlapping` initialize all of it.
@@ -997,13 +926,14 @@ impl Repr<Mutable> {
         }
 
         // The buffer is InlineBuffer or a unique HeapBuffer here, so we can modify it in place.
-        if replace_len > removed_len {
-            self.reserve(replace_len - removed_len)?;
+        let additional = replace_len.saturating_sub(removed_len);
+        if self.spare_capacity() < additional {
+            self.grow_amortized(additional)?;
         }
 
         // SAFETY:
-        // - The buffer is neither StaticBuffer nor a shared HeapBuffer (checked above, and `reserve`
-        //   keeps it).
+        // - The buffer is modifiable and has capacity for `new_len` bytes, which the condition
+        //   above or `grow_amortized` ensures.
         // - `ptr::copy` moves `data[end..len]` to `data[start + replace_len..new_len]`, both of which
         //   are within the buffer.
         // - `replace_with` doesn't overlap `data`.
@@ -1090,24 +1020,59 @@ impl Repr<Mutable> {
     /// - The buffer is not StaticBuffer.
     /// - If the buffer is HeapBuffer, it must be unique.
     fn ensure_modifiable(&mut self) -> Result<(), ReserveError> {
-        if self.is_heap_buffer() {
-            // SAFETY: we just checked self is HeapBuffer
-            let heap = unsafe { self.as_heap_buffer_mut() };
+        if !self.is_modifiable() {
+            let copied = Repr::from_str(self.as_str())?;
+            self.replace_inner(copied);
+        }
+        Ok(())
+    }
 
-            if !heap.is_unique() {
-                // `heap` is shared, we need to create a new buffer.
-                let str = heap.as_str();
-                let new_heap = HeapBuffer::<Mutable>::new(str)?;
-                // SAFETY: `self` is overwritten immediately below and `heap` is not accessed again.
-                unsafe { heap.release() };
-                *self = Repr::from_heap(new_heap);
-            } else {
-                // `heap` is unique, we can modify it in place.
-            }
-        } else if self.is_static_buffer() {
-            // StaticBuffer is immutable, need to convert to other buffer.
-            let next = Repr::from_str(self.as_str())?;
-            self.replace_inner(next);
+    // NOTE: When combined with `spare_capacity()`, check this last. The atomic load in
+    //       `is_unique()` makes the optimizer read the buffer again for anything checked after it.
+    #[inline]
+    fn is_modifiable(&self) -> bool {
+        !self.is_static_buffer() && self.is_unique()
+    }
+
+    fn grow_amortized(&mut self, additional: usize) -> Result<(), ReserveError> {
+        let len = self.len();
+        let required = len.checked_add(additional).ok_or(ReserveError)?;
+        let capacity = if required <= MAX_INLINE_SIZE {
+            // The capacity of InlineBuffer is fixed, so there is nothing to amortize.
+            required
+        } else {
+            // Grow by at least 1.5x to amortize reallocations. `len + len / 2` can't overflow
+            // because `len` is at most `isize::MAX`.
+            required.max(len + len / 2)
+        };
+        // SAFETY: `capacity` is not less than `len`.
+        unsafe { self.reallocate(capacity) }
+    }
+
+    /// Moves the content to a modifiable buffer with `capacity`, which is an InlineBuffer if
+    /// `capacity` fits in it.
+    ///
+    /// # Safety
+    ///
+    /// `capacity` must be greater than or equal to `len()`.
+    unsafe fn reallocate(&mut self, capacity: usize) -> Result<(), ReserveError> {
+        debug_assert!(self.len() <= capacity);
+
+        if capacity <= MAX_INLINE_SIZE {
+            // SAFETY: From `# Safety`, `len() <= capacity <= MAX_INLINE_SIZE`.
+            let inline = unsafe { InlineBuffer::new(self.as_str()) };
+            self.replace_inner(Repr::from_inline(inline));
+        } else if self.is_heap_buffer() && self.is_unique() {
+            // SAFETY:
+            // - We just checked that `self` is a unique HeapBuffer.
+            // - From `# Safety`, `capacity` is not less than the length.
+            unsafe { self.as_heap_buffer_mut().realloc(capacity) }?;
+        } else {
+            // SAFETY: From `# Safety`, `capacity` is not less than the length.
+            let heap =
+                unsafe { HeapBuffer::<Mutable>::from_str_with_capacity(self.as_str(), capacity) }?;
+            // Replace only after the copy, so a failed allocation leaves a shared buffer as it is.
+            self.replace_inner(Repr::from_heap(heap));
         }
         Ok(())
     }
