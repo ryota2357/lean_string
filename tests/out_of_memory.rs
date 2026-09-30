@@ -79,6 +79,32 @@ fn try_reserve_reports_allocation_failure() {
 }
 
 #[test]
+fn try_reserve_exact_reports_allocation_failure() {
+    let mut string = LeanString::from("inline");
+
+    FAIL_NEXT_ALLOCATION.set(true);
+    let result = string.try_reserve_exact(64);
+    FAIL_NEXT_ALLOCATION.set(false);
+
+    assert_eq!(result, Err(ReserveError));
+    assert_eq!(string, "inline");
+    assert!(!string.is_heap_allocated());
+}
+
+#[test]
+fn try_reserve_exact_zero_keeps_heap_buffer_shared() {
+    let mut string = LeanString::from(TEXT);
+    let shared = string.clone();
+    let shared_ptr = string.as_ptr();
+
+    let result = without_allocating(|| string.try_reserve_exact(0));
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(string.as_ptr(), shared_ptr);
+    assert_eq!(shared.as_ptr(), shared_ptr);
+}
+
+#[test]
 fn try_reserve_zero_keeps_static_buffer() {
     let mut string = LeanString::from_static_str(TEXT);
     let static_ptr = string.as_ptr();

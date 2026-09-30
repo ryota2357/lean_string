@@ -595,6 +595,60 @@ impl LeanString {
         self.0.reserve(additional)
     }
 
+    /// Reserves the minimum capacity for at least `additional` bytes more than the current
+    /// length.
+    ///
+    /// Unlike [`LeanString::reserve()`], this does not deliberately over-allocate to speculatively
+    /// avoid frequent allocations. Prefer [`LeanString::reserve()`] if future insertions are
+    /// expected.
+    ///
+    /// The capacity may still be greater than requested: a [`LeanString`] that fits in the inline
+    /// storage keeps it, whose capacity is `2 * size_of::<usize>()` bytes.
+    ///
+    /// If this [`LeanString`] is not unique, it is cloned first, even when its capacity is already
+    /// sufficient, because the reserved capacity must not be shared with others.
+    ///
+    /// Does nothing if `additional` is zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics if **any** of the following conditions is met:
+    ///
+    /// - The system is out-of-memory.
+    /// - On 64-bit architecture, the `capacity` is greater than `2^56 - 1`.
+    /// - On 32-bit architecture, the `capacity` is greater than `2^31 - 16`.
+    ///
+    /// If you want to handle such a problem manually, use [`LeanString::try_reserve_exact()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut s = LeanString::from("foo");
+    ///
+    /// s.reserve_exact(100);
+    /// assert_eq!(s.capacity(), 3 + 100);
+    ///
+    /// // The inline storage is kept if it is large enough.
+    /// let mut s = LeanString::from("foo");
+    /// s.reserve_exact(1);
+    /// assert_eq!(s.capacity(), 2 * size_of::<usize>());
+    /// ```
+    #[inline]
+    pub fn reserve_exact(&mut self, additional: usize) {
+        self.try_reserve_exact(additional).unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanString::reserve_exact()`].
+    ///
+    /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
+    /// returns a [`ReserveError`]. Otherwise it behaves the same as
+    /// [`LeanString::reserve_exact()`].
+    #[inline]
+    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), ReserveError> {
+        self.0.reserve_exact(additional)
+    }
+
     /// Shrinks the capacity of the [`LeanString`] to match its length.
     ///
     /// Only a heap buffer can shrink. This is a no-op for a [`LeanString`] stored inline or

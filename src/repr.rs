@@ -601,6 +601,18 @@ impl Repr<Mutable> {
     }
 
     #[inline]
+    pub(crate) fn reserve_exact(&mut self, additional: usize) -> Result<(), ReserveError> {
+        if additional == 0 {
+            // keep shared or static buffer.
+            return Ok(());
+        }
+        if self.spare_capacity() < additional || !self.is_modifiable() {
+            self.grow_exact(additional)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     pub(crate) fn shrink_to(&mut self, min_capacity: usize) -> Result<(), ReserveError> {
         // Only a heap buffer has a capacity to shrink.
         if !self.is_heap_buffer() {
@@ -1041,6 +1053,12 @@ impl Repr<Mutable> {
         };
         // SAFETY: `capacity` is not less than `len`.
         unsafe { self.reallocate(capacity) }
+    }
+
+    fn grow_exact(&mut self, additional: usize) -> Result<(), ReserveError> {
+        let required = self.len().checked_add(additional).ok_or(ReserveError)?;
+        // SAFETY: `required` is not less than `len()`.
+        unsafe { self.reallocate(required) }
     }
 
     /// Moves the content to a modifiable buffer with `capacity`, which is an InlineBuffer if

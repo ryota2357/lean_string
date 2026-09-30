@@ -789,29 +789,29 @@ fn test_extend_ref() {
 //     assert_eq!(&*ys, "hello my name is bob");
 // }
 
-// #[test]
-// fn test_reserve_exact() {
-//     // This is all the same as test_reserve
-//
-//     let mut s = String::new();
-//     assert_eq!(s.capacity(), 0);
-//
-//     s.reserve_exact(2);
-//     assert!(s.capacity() >= 2);
-//
-//     for _i in 0..16 {
-//         s.push('0');
-//     }
-//
-//     assert!(s.capacity() >= 16);
-//     s.reserve_exact(16);
-//     assert!(s.capacity() >= 32);
-//
-//     s.push('0');
-//
-//     s.reserve_exact(16);
-//     assert!(s.capacity() >= 33)
-// }
+#[test]
+fn test_reserve_exact() {
+    // This is all the same as test_reserve
+
+    let mut s = LeanString::new();
+    assert_eq!(s.capacity(), 2 * size_of::<usize>());
+
+    s.reserve_exact(2);
+    assert!(s.capacity() >= 2);
+
+    for _i in 0..16 {
+        s.push('0');
+    }
+
+    assert!(s.capacity() >= 16);
+    s.reserve_exact(16);
+    assert!(s.capacity() >= 32);
+
+    s.push('0');
+
+    s.reserve_exact(16);
+    assert!(s.capacity() >= 33)
+}
 
 #[test]
 // #[cfg_attr(miri, ignore)] // Miri does not support signalling OOM

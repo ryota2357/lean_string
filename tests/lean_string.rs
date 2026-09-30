@@ -185,6 +185,64 @@ fn reserve_on_heap() {
 }
 
 #[test]
+fn reserve_exact_on_inline() {
+    for c in 0..=INLINE_LIMIT {
+        let mut s = LeanString::new();
+        s.reserve_exact(c);
+        assert_eq!(s.len(), 0);
+        assert_eq!(s.capacity(), INLINE_LIMIT);
+        assert!(!s.is_heap_allocated());
+    }
+
+    let mut s = LeanString::from("abc");
+    s.reserve_exact(INLINE_LIMIT);
+    assert_eq!(s, "abc");
+    assert_eq!(s.capacity(), 3 + INLINE_LIMIT);
+    assert!(s.is_heap_allocated());
+}
+
+#[test]
+fn reserve_exact_on_heap() {
+    let text = "a".repeat(100);
+
+    let mut unique = LeanString::from(text.as_str());
+    unique.reserve_exact(1);
+    assert_eq!(unique, text);
+    assert_eq!(unique.capacity(), 101);
+
+    // Already enough capacity, so nothing changes.
+    unique.reserve_exact(1);
+    assert_eq!(unique.capacity(), 101);
+
+    let mut shared = LeanString::from(text.as_str());
+    let original = shared.clone();
+    shared.reserve_exact(1);
+    assert_eq!(shared, text);
+    assert_eq!(shared.capacity(), 101);
+    assert_ne!(shared.as_ptr(), original.as_ptr());
+    assert_eq!(original, text);
+    assert_eq!(original.capacity(), 100);
+}
+
+#[test]
+fn reserve_exact_on_static() {
+    let text = "a static text that is longer than the inline limit";
+
+    let mut long = LeanString::from_static_str(text);
+    long.reserve_exact(1);
+    assert_eq!(long, text);
+    assert_eq!(long.capacity(), text.len() + 1);
+    assert!(long.is_heap_allocated());
+
+    let mut short = LeanString::from_static_str(text);
+    short.truncate(3);
+    short.reserve_exact(1);
+    assert_eq!(short, "a s");
+    assert_eq!(short.capacity(), INLINE_LIMIT);
+    assert!(!short.is_heap_allocated());
+}
+
+#[test]
 fn modifying_short_shared_heap_moves_to_inline() {
     let text = "a text that is longer than the inline limit";
 
