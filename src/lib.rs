@@ -1415,14 +1415,7 @@ impl LeanString {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
-        if self.0.is_unique() {
-            // SAFETY:
-            // - `self` is unique.
-            // - 0 bytes is always valid UTF-8, and initialized.
-            unsafe { self.0.set_len(0) }
-        } else {
-            self.0.replace_inner(Repr::new());
-        }
+        self.0.clear()
     }
 
     /// Returns whether the [`LeanString`] is heap-allocated.

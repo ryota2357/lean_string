@@ -690,6 +690,7 @@ impl Repr<Mutable> {
 
         // Remove the char by shifting the rest of the string to the left.
         // SAFETY:
+        // - The buffer is modifiable, which `ensure_modifiable` above ensures.
         // - Both ranges are within the initialized `0..len` bytes, and `ptr::copy` permits them to
         //   overlap.
         // - Removing a complete character leaves valid UTF-8 in `0..len - ch_len`.
@@ -766,6 +767,8 @@ impl Repr<Mutable> {
             #[inline]
             fn drop(&mut self) {
                 // SAFETY:
+                // - The buffer is modifiable, which `ensure_modifiable` ensured before `self` was
+                //   created.
                 // - `dst_idx <= src_idx`, and `src_idx <= len`, so `dst_idx <= len`.
                 // - `dst_idx` doesn't split a char because it starts at a char boundary and
                 //   advances by `ch_len`.
@@ -924,6 +927,23 @@ impl Repr<Mutable> {
     }
 
     #[inline]
+    pub(crate) fn clear(&mut self) {
+        if self.is_static_buffer() {
+            // SAFETY:
+            // - We just checked that `self` is StaticBuffer.
+            // - 0 bytes is not greater than the length, and valid UTF-8.
+            unsafe { self.as_static_buffer_mut().set_len(0) };
+        } else if self.is_unique() {
+            // SAFETY:
+            // - `self` is modifiable: not StaticBuffer (checked above), and unique.
+            // - 0 bytes is always valid UTF-8, and initialized.
+            unsafe { self.set_len(0) };
+        } else {
+            self.replace_inner(Repr::new());
+        }
+    }
+
+    #[inline]
     pub(crate) fn truncate(&mut self, new_len: usize) -> Result<(), ReserveError> {
         if new_len >= self.len() {
             return Ok(());
@@ -1074,28 +1094,22 @@ impl Repr<Mutable> {
     }
 
     /// # Safety
+    /// - The buffer must be modifiable: not StaticBuffer, and unique if it is HeapBuffer.
     /// - `new_len` must be less than or equal to `capacity()`
     /// - The elements at `0..new_len` must be initialized and valid UTF-8.
-    /// - If the underlying buffer is a `HeapBuffer`, it must be unique.
-    /// - If the underlying buffer is a `InlineBuffer`, `new_len <= MAX_INLINE_SIZE` must be true.
-    #[inline]
-    pub(crate) unsafe fn set_len(&mut self, new_len: usize) {
+    unsafe fn set_len(&mut self, new_len: usize) {
+        debug_assert!(self.is_modifiable());
         debug_assert!(new_len <= self.capacity());
 
-        if self.is_static_buffer() {
-            // SAFETY:
-            // - We just checked that `self` is StaticBuffer
-            // - `new_len` is less than or equal to `capacity()`
-            unsafe { self.as_static_buffer_mut().set_len(new_len) };
-        } else if self.is_heap_buffer() {
+        if self.is_heap_buffer() {
             // SAFETY:
             // - We just checked that `self` is HeapBuffer.
             // - From `#Safety`, the buffer is unique.
             unsafe { self.as_heap_buffer_mut().set_len(new_len) };
         } else {
             // SAFETY:
-            // - The number of types of buffer is 3, and the remaining is InlineBuffer.
-            // - From `#Safety`, `new_len <= MAX_INLINE_SIZE` is true.
+            // - From `#Safety`, the buffer is not StaticBuffer, so the remaining is InlineBuffer.
+            // - From `#Safety`, `new_len <= capacity() == MAX_INLINE_SIZE`.
             unsafe { self.as_inline_buffer_mut().set_len(new_len) };
         }
     }
