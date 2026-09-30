@@ -602,41 +602,15 @@ impl Repr<Mutable> {
 
     #[inline]
     pub(crate) fn shrink_to(&mut self, min_capacity: usize) -> Result<(), ReserveError> {
-        // If the buffer is not heap allocated, we can't shrink it.
+        // Only a heap buffer has a capacity to shrink.
         if !self.is_heap_buffer() {
             return Ok(());
         }
-
-        // SAFETY: We did early return if the buffer is not HeapBuffer.
-        let heap = unsafe { self.as_heap_buffer_mut() };
-
-        let new_capacity = heap.len().max(min_capacity);
-        let old_capacity = heap.capacity();
-
-        if new_capacity <= MAX_INLINE_SIZE {
-            // We can convert the HeapBuffer to InlineBuffer.
-            // SAFETY:
-            // `heap.len() <= new_capacity` and `new_capacity <= MAX_INLINE_SIZE`
-            // thus, `heap.len() <= MAX_INLINE_SIZE`
-            let inline = unsafe { InlineBuffer::new(heap.as_str()) };
-            self.replace_inner(Repr::from_inline(inline));
-        } else if new_capacity >= old_capacity {
-            // No need to shrink the buffer.
-        } else if heap.is_unique() {
-            // Try to extend the buffer in place.
-            // SAFETY: `heap` is unique, and `new_capacity < old_capacity`
-            unsafe { heap.realloc(new_capacity)? };
-        } else {
-            // We need to create a new buffer because the current buffer is shared with others.
-            let str = heap.as_str();
-            // SAFETY: `new_capacity` is not less than the length.
-            let new_heap =
-                unsafe { HeapBuffer::<Mutable>::from_str_with_capacity(str, new_capacity) }?;
-            // SAFETY: `self` is overwritten immediately below and `heap` is not accessed again.
-            unsafe { heap.release() };
-            *self = Repr::from_heap(new_heap);
-        };
-
+        let capacity = self.len().max(min_capacity);
+        if capacity < self.capacity() {
+            // SAFETY: `capacity` is not less than `len()`.
+            unsafe { self.reallocate(capacity) }?;
+        }
         Ok(())
     }
 
