@@ -660,29 +660,12 @@ impl Repr<Mutable> {
             self.grow_amortized(ch_len)?;
         }
 
-        // A `copy_nonoverlapping` with a runtime length emits a `memcpy` call. Constant-size copies
-        // let the optimizer keep `buf` in registers and store it with a single instruction or two.
-        // Matching on `encoded.len()` rather than `ch_len` lets it merge the branches of
-        // `encode_utf8` with those of the `match`.
-        //
         // SAFETY:
         // - The buffer is modifiable and has `ch_len` bytes of spare capacity, which the condition
         //   above or `grow_amortized` ensures.
-        // - `encoded` lives in the local `buf`, so it doesn't overlap the buffer.
-        // - `encoded` is the `ch_len`-byte UTF-8 encoding of `ch`, so after the copy,
-        //   `0..(len + ch_len)` is initialized with valid UTF-8.
+        // - After `write_char`, `0..(len + ch_len)` is initialized with valid UTF-8.
         unsafe {
-            let dst = self.as_mut_ptr().add(len);
-            let mut buf = [0; 4];
-            let encoded = ch.encode_utf8(&mut buf);
-            let src = encoded.as_ptr();
-            match encoded.len() {
-                1 => ptr::copy_nonoverlapping(src, dst, 1),
-                2 => ptr::copy_nonoverlapping(src, dst, 2),
-                3 => ptr::copy_nonoverlapping(src, dst, 3),
-                4 => ptr::copy_nonoverlapping(src, dst, 4),
-                _ => hint::unreachable_unchecked(),
-            }
+            write_char(self.as_mut_ptr().add(len), ch);
             self.set_len(len + ch_len);
         }
 
@@ -883,6 +866,34 @@ impl Repr<Mutable> {
 
             // and lastly resize the string
             self.set_len(len + str_len);
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn insert_char(&mut self, idx: usize, ch: char) -> Result<(), ReserveError> {
+        assert!(
+            self.as_str().is_char_boundary(idx),
+            "index is not a char boundary or out of bounds (index: {idx})",
+        );
+
+        let len = self.len();
+        let ch_len = ch.len_utf8();
+
+        if self.spare_capacity() < ch_len || !self.is_modifiable() {
+            self.grow_amortized(ch_len)?;
+        }
+
+        // SAFETY:
+        // - We contracted that we can split self at `idx`.
+        // - The buffer is modifiable and has `ch_len` bytes of spare capacity, which the condition
+        //   above or `grow_amortized` ensures.
+        // - The gap is filled by the UTF-8 encoding of `ch`.
+        unsafe {
+            let data = self.as_mut_ptr();
+            ptr::copy(data.add(idx), data.add(idx + ch_len), len - idx);
+            write_char(data.add(idx), ch);
+            self.set_len(len + ch_len);
         }
         Ok(())
     }
@@ -1243,6 +1254,34 @@ impl Repr<Immutable> {
                 }
                 Err(err) => Err((Repr::from_heap(heap), err)),
             }
+        }
+    }
+}
+
+/// # Safety
+///
+/// `dst` must be valid for writes of `ch.len_utf8()` bytes.
+#[inline(always)]
+const unsafe fn write_char(dst: *mut u8, ch: char) {
+    let mut buf = [0; 4];
+    let encoded = ch.encode_utf8(&mut buf);
+    let src = encoded.as_ptr();
+
+    // A `copy_nonoverlapping` with a runtime length emits a `memcpy` call. Constant-size copies
+    // let the optimizer keep `buf` in registers and store it with a single instruction or two.
+    // Matching on `encoded.len()` rather than `ch.len_utf8()` lets it merge the branches of
+    // `encode_utf8` with those of the `match`.
+    //
+    // SAFETY:
+    // - `encoded` is `ch.len_utf8()` bytes long, which `dst` is valid for by `# Safety`.
+    // - `encoded` lives in the local `buf`, so it doesn't overlap `dst`.
+    unsafe {
+        match encoded.len() {
+            1 => ptr::copy_nonoverlapping(src, dst, 1),
+            2 => ptr::copy_nonoverlapping(src, dst, 2),
+            3 => ptr::copy_nonoverlapping(src, dst, 3),
+            4 => ptr::copy_nonoverlapping(src, dst, 4),
+            _ => hint::unreachable_unchecked(),
         }
     }
 }

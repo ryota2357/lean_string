@@ -314,6 +314,26 @@ fn push(input: String, ch: char) {
 
 #[property_test]
 #[cfg_attr(miri, ignore)]
+fn insert(input: String, ch: char, idx: Index) {
+    let boundaries: Vec<usize> = (0..=input.len()).filter(|&i| input.is_char_boundary(i)).collect();
+    let idx = boundaries[idx.index(boundaries.len())];
+
+    let mut expected = input.clone();
+    expected.insert(idx, ch);
+
+    let mut unique = LeanString::from(input.as_str());
+    unique.insert(idx, ch);
+    prop_assert_eq!(unique, expected.as_str());
+
+    let mut shared = LeanString::from(input.as_str());
+    let cloned = shared.clone();
+    shared.insert(idx, ch);
+    prop_assert_eq!(shared, expected.as_str());
+    prop_assert_eq!(cloned, input);
+}
+
+#[property_test]
+#[cfg_attr(miri, ignore)]
 fn replace_range(input: String, replace_with: String, start: Index, end: Index) {
     let boundaries: Vec<usize> = (0..=input.len()).filter(|&i| input.is_char_boundary(i)).collect();
     let start = boundaries[start.index(boundaries.len())];

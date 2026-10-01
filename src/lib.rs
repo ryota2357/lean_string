@@ -992,7 +992,7 @@ impl LeanString {
     /// does not lie on a [`char`] boundary.
     #[inline]
     pub fn try_insert(&mut self, idx: usize, ch: char) -> Result<(), ReserveError> {
-        self.0.insert_str(idx, ch.encode_utf8(&mut [0; 4]))
+        self.0.insert_char(idx, ch)
     }
 
     /// Inserts a string slice into the [`LeanString`] at a byte position.

@@ -193,6 +193,31 @@ fn push_str_after_clone(c: &mut Criterion) {
     group.finish();
 }
 
+fn insert(c: &mut Criterion) {
+    let mut group = c.benchmark_group("insert");
+    for ch in ['a', 'é', 'あ', '🦀'] {
+        let ch_len = ch.len_utf8();
+        duplicate! {
+            [
+                label         StrTy;
+                ["current"]   [lean_string::LeanString];
+                ["prev"]      [lean_string_prev::LeanString];
+                ["std"]       [String];
+            ]
+            group.bench_with_input(BenchmarkId::new(label, ch_len), &ch_len, |b, _| {
+                b.iter(|| {
+                    let mut s = StrTy::new();
+                    for _ in 0..black_box(16) {
+                        s.insert(black_box(0), black_box(ch));
+                    }
+                    s
+                })
+            });
+        }
+    }
+    group.finish();
+}
+
 fn as_str(c: &mut Criterion) {
     let mut group = c.benchmark_group("as_str");
     for s in samples() {
@@ -315,6 +340,7 @@ criterion_group!(
     push,
     push_str,
     push_str_after_clone,
+    insert,
     as_str,
     eq,
     eq_cloned,
