@@ -5,13 +5,10 @@ use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_ma
 use duplicate::duplicate;
 use std::{borrow::Cow, hint::black_box};
 
-fn samples() -> Vec<String> {
-    [0, 1, 15, 16, 17, 256].iter().map(|&n| ascii(n)).collect()
-}
-
 fn from(c: &mut Criterion) {
     let mut group = c.benchmark_group("from");
-    for s in samples() {
+    // `HeapBuffer::new` copies `17..32`, `32..=64`, and `65..` differently.
+    for s in [0, 1, 15, 16, 17, 32, 64, 65, 256].map(ascii) {
         let s = s.as_str();
         let len = s.len();
         duplicate! {
@@ -76,7 +73,7 @@ fn to_lean_string(c: &mut Criterion) {
 
 fn clone(c: &mut Criterion) {
     let mut group = c.benchmark_group("clone");
-    for s in samples() {
+    for s in [0, 1, 15, 16, 17, 50, 100, 1000].map(ascii) {
         let len = s.len();
         duplicate! {
             [
@@ -220,7 +217,7 @@ fn insert(c: &mut Criterion) {
 
 fn as_str(c: &mut Criterion) {
     let mut group = c.benchmark_group("as_str");
-    for s in samples() {
+    for s in [0, 1, 15, 16, 17, 100].map(ascii) {
         let len = s.len();
         duplicate! {
             [
@@ -242,7 +239,7 @@ fn as_str(c: &mut Criterion) {
 
 fn eq(c: &mut Criterion) {
     let mut group = c.benchmark_group("eq");
-    for s in samples() {
+    for s in [0, 1, 15, 16, 17, 100].map(ascii) {
         let len = s.len();
         duplicate! {
             [
@@ -265,7 +262,7 @@ fn eq(c: &mut Criterion) {
 
 fn eq_cloned(c: &mut Criterion) {
     let mut group = c.benchmark_group("eq/cloned");
-    for s in samples() {
+    for s in [0, 1, 15, 16, 17, 100].map(ascii) {
         let len = s.len();
         duplicate! {
             [

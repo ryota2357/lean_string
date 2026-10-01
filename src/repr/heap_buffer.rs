@@ -117,15 +117,39 @@ const _: () = {
 
 impl<H: Header> HeapBuffer<H> {
     pub(super) fn new(text: &str) -> Result<Self, ReserveError> {
-        // SAFETY: All `text.len()` bytes are initialized by the copy below.
-        let buffer = unsafe { Self::new_uninit(text.len()) }?;
+        let len = text.len();
 
+        // SAFETY: All `len` bytes are initialized by the copy below.
+        let buffer = unsafe { Self::new_uninit(len) }?;
+
+        // A `copy_nonoverlapping` with a runtime length emits a `memcpy` call, whose cost shows
+        // for a copy just over the inline size. For `n <= len <= 2 * n`, a pair of `n`-byte copies
+        // taken from either end covers `0..len` exactly, so `N..=4 * N` takes two constant-size
+        // copies of `N` or `2 * N` bytes. The copy size scales with the word size because a larger
+        // constant-size copy is not always inlined: armv7, for one, lowers a 32-byte copy to a
+        // `memcpy` call. Longer text is left to `memcpy`, which is faster there. Shorter text fits
+        // the inline buffer and does not come here from `Repr::from_str`, so it is left to
+        // `memcpy` too.
+        //
         // SAFETY:
-        // - src (`text`) and dst (`buffer.ptr`) are valid for `text.len()` bytes because
-        //   `new_uninit` allocated at least `text.len()` bytes.
+        // - Every copy stays within `0..len`, for which src (`text`) is valid, and dst
+        //   (`buffer.ptr`) is valid because `new_uninit` allocated at least `len` bytes.
         // - Both src and dst are aligned for u8.
         // - src and dst don't overlap because we allocated dst just now.
-        unsafe { ptr::copy_nonoverlapping(text.as_ptr(), buffer.ptr.as_ptr(), text.len()) };
+        unsafe {
+            const N: usize = MAX_INLINE_SIZE;
+            let src = text.as_ptr();
+            let dst = buffer.ptr.as_ptr();
+            if !(N..=4 * N).contains(&len) {
+                ptr::copy_nonoverlapping(src, dst, len);
+            } else if len >= 2 * N {
+                ptr::copy_nonoverlapping(src, dst, 2 * N);
+                ptr::copy_nonoverlapping(src.add(len - 2 * N), dst.add(len - 2 * N), 2 * N);
+            } else {
+                ptr::copy_nonoverlapping(src, dst, N);
+                ptr::copy_nonoverlapping(src.add(len - N), dst.add(len - N), N);
+            }
+        }
 
         Ok(buffer)
     }
