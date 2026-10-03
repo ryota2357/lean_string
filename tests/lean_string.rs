@@ -741,6 +741,94 @@ fn insert_fail() {
 }
 
 #[test]
+fn extend_from_within_in_place() {
+    let mut inline = LeanString::from("abc");
+    inline.extend_from_within(1..);
+    assert_eq!(inline, "abcbc");
+    assert!(!inline.is_heap_allocated());
+
+    let mut heap = LeanString::with_capacity(100);
+    heap.push_str("qwer tyui opas dfgh jklz xcvb nm");
+    let ptr = heap.as_ptr();
+    heap.extend_from_within(5..=8);
+    assert_eq!(heap, "qwer tyui opas dfgh jklz xcvb nmtyui");
+    assert_eq!(heap.as_ptr(), ptr);
+}
+
+#[test]
+fn extend_from_within_inline_to_heap() {
+    let text = &"0123456789abcdef"[..INLINE_LIMIT];
+    let mut s = LeanString::from(text);
+    assert!(!s.is_heap_allocated());
+    s.extend_from_within(1..3);
+    assert_eq!(s, format!("{text}12"));
+    assert!(s.is_heap_allocated());
+}
+
+#[test]
+fn extend_from_within_reallocate() {
+    let mut s = LeanString::from("qwer tyui opas dfgh jklz xcvb nm");
+    s.shrink_to_fit();
+    let capacity = s.capacity();
+    // There is no spare capacity, so the source range is read after reallocation.
+    s.extend_from_within(..);
+    assert_eq!(s, "qwer tyui opas dfgh jklz xcvb nmqwer tyui opas dfgh jklz xcvb nm");
+    assert!(s.capacity() > capacity);
+}
+
+#[test]
+fn extend_from_within_cow() {
+    let mut heap = LeanString::from("qwer tyui opas dfgh jklz xcvb nm");
+    let cloned = heap.clone();
+    heap.extend_from_within(..4);
+    assert_eq!(heap, "qwer tyui opas dfgh jklz xcvb nmqwer");
+    assert_eq!(cloned, "qwer tyui opas dfgh jklz xcvb nm");
+
+    let mut static_ = LeanString::from_static_str("01234567890123456789");
+    let cloned = static_.clone();
+    static_.extend_from_within(10..=12);
+    assert_eq!(static_, "01234567890123456789012");
+    assert!(static_.is_heap_allocated());
+    assert_eq!(cloned, "01234567890123456789");
+    assert!(!cloned.is_heap_allocated());
+}
+
+#[test]
+fn extend_from_within_nothing_keeps_buffer() {
+    let mut heap = LeanString::from("qwer tyui opas dfgh jklz xcvb nm");
+    let cloned = heap.clone();
+    heap.extend_from_within(3..3);
+    assert_eq!(heap.as_ptr(), cloned.as_ptr());
+
+    let text = "01234567890123456789";
+    let mut static_ = LeanString::from_static_str(text);
+    static_.extend_from_within(3..3);
+    assert_eq!(static_.as_ptr(), text.as_ptr());
+}
+
+#[test]
+#[should_panic(expected = "index is not a char boundary or out of bounds (index: 1)")]
+fn extend_from_within_not_char_boundary() {
+    let mut s = LeanString::from("🦄");
+    s.extend_from_within(1..);
+}
+
+#[test]
+#[should_panic(expected = "index is not a char boundary or out of bounds (index: 7)")]
+fn extend_from_within_out_of_bounds() {
+    let mut s = LeanString::from("012345");
+    s.extend_from_within(..7);
+}
+
+#[test]
+#[should_panic(expected = "range start is greater than end (start: 3, end: 2)")]
+fn extend_from_within_start_greater_than_end() {
+    let mut s = LeanString::from("012345");
+    #[allow(clippy::reversed_empty_ranges)]
+    s.extend_from_within(3..2);
+}
+
+#[test]
 fn replace_range_inline_to_heap() {
     let mut s = LeanString::from("0123");
     assert!(!s.is_heap_allocated());

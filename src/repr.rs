@@ -6,7 +6,7 @@ use core::{
     marker::PhantomData,
     mem,
     mem::MaybeUninit,
-    ops::{Bound, RangeBounds},
+    ops::{Bound, Range, RangeBounds},
     ptr, slice, str,
 };
 
@@ -652,6 +652,40 @@ impl Repr<Mutable> {
     }
 
     #[inline]
+    pub(crate) fn extend_from_within(
+        &mut self,
+        src: impl RangeBounds<usize>,
+    ) -> Result<(), ReserveError> {
+        let Range { start, end } = slice_range(self.as_str(), src);
+        let count = end - start;
+        if count == 0 {
+            // Nothing to write, and keep a shared or static buffer as it is.
+            return Ok(());
+        }
+        let len = self.len();
+
+        if self.spare_capacity() < count || !self.is_modifiable() {
+            self.grow_amortized(count)?;
+        }
+
+        // SAFETY:
+        // - The buffer is modifiable and has `count` bytes of spare capacity, which the condition
+        //   above or `grow_amortized` ensures. `grow_amortized` keeps the content, so `start..end`
+        //   still refers to the same bytes.
+        // - The source `start..end` is within `0..len`, and the destination `len..(len + count)`
+        //   is the spare capacity, so they don't overlap.
+        // - `start` and `end` are char boundaries, so `0..(len + count)` is valid UTF-8 after the
+        //   copy.
+        unsafe {
+            let data = self.as_mut_ptr();
+            ptr::copy_nonoverlapping(data.add(start), data.add(len), count);
+            self.set_len(len + count);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     pub(crate) fn push_char(&mut self, ch: char) -> Result<(), ReserveError> {
         let len = self.len();
         let ch_len = ch.len_utf8();
@@ -905,29 +939,8 @@ impl Repr<Mutable> {
         replace_with: &str,
     ) -> Result<(), ReserveError> {
         let len = self.len();
-
-        // `usize::MAX` is never in bounds, so saturating keeps an overflowed bound out of bounds.
-        let start = match range.start_bound() {
-            Bound::Included(&start) => start,
-            Bound::Excluded(&start) => start.saturating_add(1),
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&end) => end.saturating_add(1),
-            Bound::Excluded(&end) => end,
-            Bound::Unbounded => len,
-        };
-
         let text = self.as_str();
-        assert!(
-            text.is_char_boundary(start),
-            "index is not a char boundary or out of bounds (index: {start})",
-        );
-        assert!(
-            text.is_char_boundary(end),
-            "index is not a char boundary or out of bounds (index: {end})",
-        );
-        assert!(start <= end, "range start is greater than end (start: {start}, end: {end})");
+        let Range { start, end } = slice_range(text, range);
 
         let removed_len = end - start;
         let replace_len = replace_with.len();
@@ -1256,6 +1269,39 @@ impl Repr<Immutable> {
             }
         }
     }
+}
+
+/// Converts `range` into a [`Range`] over `text`, like the unstable `core::slice::range`.
+///
+/// # Panics
+///
+/// Panics if the start or end of the range does not lie on a [`char`] boundary of `text`, is out
+/// of bounds, or if the start is greater than the end.
+#[inline]
+fn slice_range(text: &str, range: impl RangeBounds<usize>) -> Range<usize> {
+    // `usize::MAX` is never in bounds, so saturating keeps an overflowed bound out of bounds.
+    let start = match range.start_bound() {
+        Bound::Included(&start) => start,
+        Bound::Excluded(&start) => start.saturating_add(1),
+        Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        Bound::Included(&end) => end.saturating_add(1),
+        Bound::Excluded(&end) => end,
+        Bound::Unbounded => text.len(),
+    };
+
+    assert!(
+        text.is_char_boundary(start),
+        "index is not a char boundary or out of bounds (index: {start})",
+    );
+    assert!(
+        text.is_char_boundary(end),
+        "index is not a char boundary or out of bounds (index: {end})",
+    );
+    assert!(start <= end, "range start is greater than end (start: {start}, end: {end})");
+
+    start..end
 }
 
 /// # Safety

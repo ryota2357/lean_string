@@ -354,6 +354,28 @@ fn replace_range(input: String, replace_with: String, start: Index, end: Index) 
     prop_assert_eq!(cloned, input);
 }
 
+#[property_test]
+#[cfg_attr(miri, ignore)]
+fn extend_from_within(input: String, start: Index, end: Index) {
+    let boundaries: Vec<usize> = (0..=input.len()).filter(|&i| input.is_char_boundary(i)).collect();
+    let start = boundaries[start.index(boundaries.len())];
+    let end = boundaries[end.index(boundaries.len())];
+    let range = start.min(end)..start.max(end);
+
+    let mut expected = input.clone();
+    expected.extend_from_within(range.clone());
+
+    let mut unique = LeanString::from(input.as_str());
+    unique.extend_from_within(range.clone());
+    prop_assert_eq!(unique, expected.as_str());
+
+    let mut shared = LeanString::from(input.as_str());
+    let cloned = shared.clone();
+    shared.extend_from_within(range);
+    prop_assert_eq!(shared, expected.as_str());
+    prop_assert_eq!(cloned, input);
+}
+
 // Arbitrary `String`s are mostly non-ASCII, so they rarely contain long ASCII runs, which case
 // conversion handles on a separate path. Also mix ASCII letters with non-ASCII chars whose case
 // mapping is special: Σ depends on its context, and the others change the length.

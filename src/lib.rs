@@ -852,6 +852,63 @@ impl LeanString {
         self.0.push_str(string)
     }
 
+    /// Copies bytes from the `src` range to the end of this [`LeanString`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if **any** of the following conditions is met:
+    ///
+    /// 1. The starting point or end point do not lie on a [`char`] boundary, or they're out of
+    ///    bounds.
+    /// 2. The starting point is greater than the end point.
+    /// 3. The system is out-of-memory when cloning the [`LeanString`].
+    /// 4. The length of after extending is greater than `2^56 - 1` on 64-bit architecture, or
+    ///    `2^31 - 16` on 32-bit architecture.
+    ///
+    /// For 3 and 4, if you want to handle such a problem manually, use
+    /// [`LeanString::try_extend_from_within()`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lean_string::LeanString;
+    /// let mut s = LeanString::from("abcde");
+    ///
+    /// s.extend_from_within(2..);
+    /// assert_eq!(s, "abcdecde");
+    ///
+    /// s.extend_from_within(..2);
+    /// assert_eq!(s, "abcdecdeab");
+    ///
+    /// s.extend_from_within(4..8);
+    /// assert_eq!(s, "abcdecdeabecde");
+    /// ```
+    #[inline]
+    pub fn extend_from_within(&mut self, src: impl RangeBounds<usize>) {
+        self.try_extend_from_within(src).unwrap_with_msg()
+    }
+
+    /// Fallible version of [`LeanString::extend_from_within()`].
+    ///
+    /// This method won't panic if the system is out-of-memory, or the `capacity` becomes too large
+    /// by extending, but returns a [`ReserveError`]. Otherwise it behaves the same as
+    /// [`LeanString::extend_from_within()`].
+    ///
+    /// On failure, `self` is left unchanged because capacity is reserved before the bytes are
+    /// copied.
+    ///
+    /// # Panics
+    ///
+    /// This method still panics if the starting point or end point do not lie on a [`char`]
+    /// boundary, if they're out of bounds, or if the starting point is greater than the end point.
+    #[inline]
+    pub fn try_extend_from_within(
+        &mut self,
+        src: impl RangeBounds<usize>,
+    ) -> Result<(), ReserveError> {
+        self.0.extend_from_within(src)
+    }
+
     /// Removes a [`char`] from the [`LeanString`] at a byte position and returns it.
     ///
     /// # Panics

@@ -92,6 +92,22 @@ fn try_reserve_exact_reports_allocation_failure() {
 }
 
 #[test]
+fn try_extend_from_within_allocation_failure_leaves_string_unchanged() {
+    let mut string = LeanString::from(TEXT);
+    let shared = string.clone();
+    let shared_ptr = string.as_ptr();
+
+    FAIL_NEXT_ALLOCATION.set(true);
+    let result = string.try_extend_from_within(..);
+    FAIL_NEXT_ALLOCATION.set(false);
+
+    assert_eq!(result, Err(ReserveError));
+    assert_eq!(string, TEXT);
+    assert_eq!(string.as_ptr(), shared_ptr);
+    assert_eq!(shared.as_ptr(), shared_ptr);
+}
+
+#[test]
 fn try_reserve_exact_zero_keeps_heap_buffer_shared() {
     let mut string = LeanString::from(TEXT);
     let shared = string.clone();
