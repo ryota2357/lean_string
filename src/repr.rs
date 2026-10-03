@@ -282,6 +282,10 @@ impl<M: Mutability> Repr<M> {
     pub(crate) const fn as_bytes(&self) -> &[u8] {
         let len = self.len();
 
+        // NOTE: On x86, this is compiled to a branch rather than `cmov`s, because the heap pointer
+        //       is selected by a `cmov` with a memory operand, which LLVM turns into a branch
+        //       (`-x86-cmov-converter-force-mem-operand`, on by default) along with the `cmov`s of
+        //       `len`. `hint::select_unpredictable` would prevent it, but is not yet const-stable.
         let ptr = if self.last_byte() >= LastByte::HeapMarker as u8 {
             self.0 as *const u8
         } else {
