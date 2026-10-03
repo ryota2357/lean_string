@@ -24,6 +24,9 @@ Compact, clone-on-write string.
   - The std library String grows at a rate of 2x
 - Niche optimized for `Option<LeanString>`.
   - `size_of::<Option<LeanString>>() == size_of::<LeanString>()`
+- Performance-oriented, tuned by inspecting the generated assembly.
+  - Optimizer hints to eliminate redundant checks.
+  - Short strings are assembled directly in registers.
 - High API compatibility for `String`.
 - Supports `no_std` environment.
 
