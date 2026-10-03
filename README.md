@@ -14,7 +14,7 @@ Compact, clone-on-write string.
   - one `usize` smaller than `String`.
 - Stores up to 16 bytes inline (on the stack).
   - 8 bytes if 32-bit architecture.
-  - Strings larger than 16 bytes are stored on the heap.
+  - Strings larger than that are stored on the heap.
 - Clone-on-Write (CoW)
   - `LeanString` uses a reference-counted heap buffer (like `Arc`).
   - When a `LeanString` is cloned, the heap buffer is shared.
@@ -40,14 +40,14 @@ use lean_string::LeanString;
 let small = LeanString::from("Hello");
 
 // More than 16 bytes, stored on the heap (64-bit architecture).
-let large = LeanString::from("This is a not long but can't store inlined");
+let large = LeanString::from("This is not long, but can't be stored inline");
 
 // Clone is O(1), heap buffer is shared.
 let mut cloned = large.clone();
 
 // Mutating a shared string will copy the heap buffer. (CoW)
 cloned.push('!');
-assert_eq!(cloned, "This is a not long but can't store inlined!");
+assert_eq!(cloned, "This is not long, but can't be stored inline!");
 assert_eq!(large  + "!", cloned);
 ```
 

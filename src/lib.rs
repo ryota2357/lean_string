@@ -468,7 +468,7 @@ impl LeanString {
     ///
     /// - [`LeanString`] backed by a `&'static str` does not write the underlying byte data, so its
     ///   capacity matches its current length.
-    /// - Otherwise, it at least `2 * size_of::<usize>()` bytes, which is the size of the inline (on
+    /// - Otherwise, it is at least `2 * size_of::<usize>()` bytes, which is the size of the inline (on
     ///   the stack) storage.
     ///
     /// # Examples
@@ -696,8 +696,8 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::shrink_to_fit()`].
     ///
-    /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::shrink_to_fit()`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
+    /// Otherwise it behaves the same as [`LeanString::shrink_to_fit()`].
     #[inline]
     pub fn try_shrink_to_fit(&mut self) -> Result<(), ReserveError> {
         self.0.shrink_to(0)
@@ -741,8 +741,8 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::shrink_to()`].
     ///
-    /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::shrink_to()`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
+    /// Otherwise it behaves the same as [`LeanString::shrink_to()`].
     #[inline]
     pub fn try_shrink_to(&mut self, min_capacity: usize) -> Result<(), ReserveError> {
         self.0.shrink_to(min_capacity)
@@ -811,8 +811,8 @@ impl LeanString {
 
     /// Fallible version of [`LeanString::pop()`].
     ///
-    /// This method won't panic if the system is out-of-memory, or the `capacity` is too large, but
-    /// returns a [`ReserveError`]. Otherwise it behaves the same as [`LeanString::pop()`].
+    /// This method won't panic if the system is out-of-memory, but returns a [`ReserveError`].
+    /// Otherwise it behaves the same as [`LeanString::pop()`].
     #[inline]
     pub fn try_pop(&mut self) -> Result<Option<char>, ReserveError> {
         self.0.pop()
@@ -1436,7 +1436,8 @@ impl LeanString {
 
     /// Reduces the length of the [`LeanString`] to zero.
     ///
-    /// If the [`LeanString`] is unique, this method will not change the capacity.
+    /// If the [`LeanString`] is unique, this method will not change the capacity, unless it is
+    /// backed by a `&'static str`, whose capacity always matches its length.
     /// Otherwise, creates a new unique [`LeanString`] without heap allocation.
     ///
     /// # Examples
