@@ -2,6 +2,42 @@
 
 <!-- Ref: https://keepachangelog.com/ -->
 
+## [0.8.0] - 2026-10-11
+
+### Added
+
+- Case conversion methods: `to_lowercase()`, `to_uppercase()`, `to_ascii_lowercase()` and `to_ascii_uppercase()` for `LeanString` and `LeanStr`, and `make_ascii_lowercase()` and `make_ascii_uppercase()` for `LeanString`. The ASCII ones have fallible `try_` variants. If no character changes, they don't allocate: the `to_` methods return a clone, and the `make_` methods leave the string untouched, even if it is shared with its clones.
+- `LeanString::replace_range()`, `LeanString::extend_from_within()` and `LeanString::reserve_exact()`, with their fallible `try_` variants.
+- `LeanStr::repeat()` and `LeanStr::try_repeat()`.
+- `from_utf16le()`, `from_utf16be()`, `from_utf16le_lossy()` and `from_utf16be_lossy()` for `LeanString` and `LeanStr`, to decode UTF-16 from bytes.
+- `as_static_str()` for `LeanString` and `LeanStr`, which returns the underlying `&'static str` if the string holds one.
+- Conversions from and to more types:
+  - `From<&mut str>` for `LeanString` and `LeanStr`.
+  - `From<&LeanString>` for `LeanStr` and `From<&LeanStr>` for `LeanString`.
+  - `From<LeanString>`, `From<LeanStr>`, `From<&LeanString>` and `From<&LeanStr>` for `Cow<'_, str>`. A string holding a `&'static str` converts into `Cow::Borrowed` without allocating.
+  - `FromIterator<LeanStr>` for `LeanString`, `FromIterator<LeanString>` for `LeanStr`, and `FromIterator<LeanString>` and `FromIterator<LeanStr>` for `String`.
+  - `AsRef<Path>` for `LeanString` and `LeanStr`, with the `std` feature.
+
+### Changed
+
+- The MSRV is now Rust 1.88.0 (was 1.85.1).
+- **Breaking:** `to_lowercase()`, `to_uppercase()`, `to_ascii_lowercase()` and `to_ascii_uppercase()` of `LeanString` and `LeanStr`, and `LeanStr::repeat()`, now return `LeanString` or `LeanStr` instead of `String`. They were previously resolved to the `str` methods through `Deref`.
+- **Breaking:** `FromUtf16Error` now matches `std`'s `FromUtf16Error`: it can no longer be constructed outside this crate, and its message tells a lone surrogate from an odd number of bytes.
+- Added `#[must_use]` to constructors, getters and methods that return a new string, which may produce new warnings where their result is discarded.
+- Modifying a string that shares its heap buffer with its clones now copies it into the inline storage, rather than a new heap buffer, if its contents fit there (e.g. after `truncate()`).
+- `retain()` no longer copies a string shared with its clones or created from a `&'static str` when the predicate keeps every character.
+- Creating a string short enough to be stored inline is even faster on 64-bit little-endian targets, as it is now assembled in registers instead of copied with `memcpy` (about 2x for lengths near the inline limit on aarch64, and about 5x for most lengths on x86_64).
+- Creating a string from a `char` is several times faster, as it is also built in registers.
+- `push()` and `insert()` of a `char`, and creating a heap-allocated string slightly over the inline limit from a `&str`, no longer call `memcpy` to copy the bytes.
+- `repeat()` fills the result by doubling the copied part instead of appending the string `n` times, which is much faster for a short string repeated many times.
+- With the `serde` feature, deserializing `LeanString` and `LeanStr` asks the deserializer for a `&str` rather than an owned `String`, which may save an intermediate allocation with some formats.
+
+### Fixed
+
+- `try_to_lean_string()` and `try_to_lean_str()` panicked on allocation failure for values converted through their `Display` implementation, instead of returning an error.
+- A panic in `From<Cow<'_, str>>` for `LeanString` and `LeanStr` now reports the caller's location.
+- Corrected the documentation of `capacity()`, `shrink_to_fit()`, `shrink_to()` and `clear()` for strings created from a `&'static str`.
+
 ## [0.7.0] - 2026-07-23
 
 ### Added
