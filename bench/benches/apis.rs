@@ -26,6 +26,25 @@ fn from(c: &mut Criterion) {
     group.finish();
 }
 
+fn from_char(c: &mut Criterion) {
+    let mut group = c.benchmark_group("from_char");
+    for ch in ['a', 'é', 'あ', '🦀'] {
+        let ch_len = ch.len_utf8();
+        duplicate! {
+            [
+                label         StrTy;
+                ["current"]   [lean_string::LeanString];
+                ["prev"]      [lean_string_prev::LeanString];
+                ["std"]       [String];
+            ]
+            group.bench_with_input(BenchmarkId::new(label, ch_len), &ch_len, |b, _| {
+                b.iter(|| StrTy::from(black_box(ch)))
+            });
+        }
+    }
+    group.finish();
+}
+
 fn from_static_str(c: &mut Criterion) {
     let mut group = c.benchmark_group("from_static_str");
     for (kind, s) in [("short", STATIC_STR_16), ("long", STATIC_STR_40)] {
@@ -330,6 +349,7 @@ fn to_uppercase(c: &mut Criterion) {
 criterion_group!(
     apis,
     from,
+    from_char,
     from_static_str,
     to_lean_string,
     clone,
