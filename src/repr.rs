@@ -636,7 +636,11 @@ impl Repr<Mutable> {
         let str_len = string.len();
 
         if self.spare_capacity() < str_len || !self.is_modifiable() {
-            self.grow_amortized(str_len)?;
+            #[cold]
+            fn grow(this: &mut Repr<Mutable>, str_len: usize) -> Result<(), ReserveError> {
+                this.grow_amortized(str_len)
+            }
+            grow(self, str_len)?;
         }
 
         // SAFETY:

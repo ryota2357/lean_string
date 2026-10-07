@@ -1,7 +1,7 @@
 //! LeanString hot paths: in-development version vs. last release (`lean_string_prev`), std as floor.
 
 use bench::{STATIC_STR_16, STATIC_STR_40, ascii};
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use duplicate::duplicate;
 use std::{borrow::Cow, hint::black_box};
 
@@ -159,8 +159,8 @@ fn push(c: &mut Criterion) {
     group.finish();
 }
 
-fn push_str(c: &mut Criterion) {
-    let mut group = c.benchmark_group("push_str");
+fn push_str_from_empty(c: &mut Criterion) {
+    let mut group = c.benchmark_group("push_str/from_empty");
     duplicate! {
         [
             label         StrTy;
@@ -173,6 +173,59 @@ fn push_str(c: &mut Criterion) {
                 let mut s = StrTy::new();
                 for _ in 0..black_box(16) {
                     s.push_str(black_box("abcdefgh"));
+                }
+                s
+            })
+        });
+    }
+    group.finish();
+}
+
+fn push_str_reserved(c: &mut Criterion) {
+    const PUSHES: usize = 64;
+    let mut group = c.benchmark_group("push_str/reserved");
+    group.throughput(Throughput::Elements(PUSHES as u64));
+    for text in [1, 8, 32].map(ascii) {
+        let text = text.as_str();
+        let len = text.len();
+        duplicate! {
+            [
+                label         StrTy;
+                ["current"]   [lean_string::LeanString];
+                ["prev"]      [lean_string_prev::LeanString];
+                ["std"]       [String];
+            ]
+            {
+                let mut s = StrTy::with_capacity(PUSHES * len);
+                group.bench_with_input(BenchmarkId::new(label, len), &len, |b, _| {
+                    b.iter(|| {
+                        for _ in 0..PUSHES {
+                            s.push_str(black_box(text));
+                        }
+                        black_box(&s);
+                        s.clear();
+                    })
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
+fn push_str_inline(c: &mut Criterion) {
+    let mut group = c.benchmark_group("push_str/inline");
+    duplicate! {
+        [
+            label         StrTy;
+            ["current"]   [lean_string::LeanString];
+            ["prev"]      [lean_string_prev::LeanString];
+            ["std"]       [String];
+        ]
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                let mut s = StrTy::new();
+                for _ in 0..8 {
+                    s.push_str(black_box("ab"));
                 }
                 s
             })
@@ -355,7 +408,9 @@ criterion_group!(
     clone,
     reserve,
     push,
-    push_str,
+    push_str_from_empty,
+    push_str_reserved,
+    push_str_inline,
     push_str_after_clone,
     insert,
     as_str,
