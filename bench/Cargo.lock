@@ -46,8 +46,8 @@ dependencies = [
  "criterion",
  "duplicate",
  "ecow",
- "lean_string 0.7.0",
- "lean_string 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lean_string 0.8.0",
+ "lean_string 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "lean_string"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "castaway",
  "itoa",
@@ -325,9 +325,9 @@ dependencies = [
 
 [[package]]
 name = "lean_string"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8899d72720b5241f886495ea979d9641ebeec862248f5b65236c659670df9e6"
+checksum = "814388560189061a39bf531f64afd9a036371e58edaf8566bd9ac4b8b0b823f0"
 dependencies = [
  "castaway",
  "itoa",

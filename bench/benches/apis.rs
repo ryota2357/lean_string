@@ -367,34 +367,44 @@ fn case_samples() -> Vec<(String, String)> {
     samples
 }
 
-// TODO: add `prev` after release 0.8.0
 fn to_lowercase(c: &mut Criterion) {
     let mut group = c.benchmark_group("to_lowercase");
     for (name, s) in case_samples() {
-        let uut = black_box(lean_string::LeanString::from(s.as_str()));
-        group.bench_with_input(BenchmarkId::new("current", &name), &name, |b, _| {
-            b.iter(|| uut.to_lowercase())
-        });
-        let std = black_box(s);
-        group.bench_with_input(BenchmarkId::new("std", &name), &name, |b, _| {
-            b.iter(|| std.to_lowercase())
-        });
+        duplicate! {
+            [
+                label        StrTy;
+                ["current"]  [lean_string::LeanString];
+                ["prev"]     [lean_string_prev::LeanString];
+                ["std"]      [String];
+            ]
+            {
+                let uut = black_box(StrTy::from(s.as_str()));
+                group.bench_with_input(BenchmarkId::new(label, &name), &name, |b, _| {
+                    b.iter(|| uut.to_lowercase())
+                });
+            }
+        }
     }
     group.finish();
 }
 
-// TODO: add `prev` after release 0.8.0
 fn to_uppercase(c: &mut Criterion) {
     let mut group = c.benchmark_group("to_uppercase");
     for (name, s) in case_samples() {
-        let uut = black_box(lean_string::LeanString::from(s.as_str()));
-        group.bench_with_input(BenchmarkId::new("current", &name), &name, |b, _| {
-            b.iter(|| uut.to_uppercase())
-        });
-        let std = black_box(s);
-        group.bench_with_input(BenchmarkId::new("std", &name), &name, |b, _| {
-            b.iter(|| std.to_uppercase())
-        });
+        duplicate! {
+            [
+                label        StrTy;
+                ["current"]  [lean_string::LeanString];
+                ["prev"]     [lean_string_prev::LeanString];
+                ["std"]      [String];
+            ]
+            {
+                let uut = black_box(StrTy::from(s.as_str()));
+                group.bench_with_input(BenchmarkId::new(label, &name), &name, |b, _| {
+                    b.iter(|| uut.to_uppercase())
+                });
+            }
+        }
     }
     group.finish();
 }
