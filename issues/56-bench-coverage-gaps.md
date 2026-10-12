@@ -25,7 +25,7 @@ asm 側から見ると、これらはいずれも `#[inline]` で下流に展開
 ### 2. パラメータ空間の穴
 
 - `from`: 長さ `[0, 1, 15, 16, 17, 32, 64, 65, 256]`。ヒープ側は `HeapBuffer::new` の分岐 (`16..32` → 16B×2、`32..=64` → 32B×2、`65..` → `memcpy`) をそれぞれ 17 / 32, 64 / 65 でカバーしており、よい。穴は inline 側: `InlineBuffer::new` は長さ `16`, `8..16` (`== 8` を別扱い), `4..8`, `2..4`, `1`, `0` で分岐するが、測っているのは 0, 1, 15, 16 だけで `2..8` と `8` が空いている。`65` より長いところは 256 だけ (`memcpy` のサイズ依存、`1000` 以上や 4 KiB 以上は見えない)。
-- `clone` は長さ依存がほぼ無いのでこのままでよいが、`clone` ベンチは `clone` + drop (criterion の `iter` は戻り値の drop も計測に含める) なので、ヒープでは atomic inc + dec の往復を測っている。名前は `clone` だが、片方だけの値は出ない。一方 `push_str/after_clone` と `CoW write` は `iter_batched` なので出力の drop が計測外で、`from` / `push` などの「drop 込み」ベンチと条件が揃っていない。
+- `clone` は長さ依存がほぼ無いのでこのままでよいが、`clone` ベンチは `clone` + drop (criterion の `iter` は戻り値の drop も計測に含める) なので、ヒープでは atomic inc + dec の往復を測っている。名前は `clone` だが、clone 単独の値は出ない。一方 `push_str/after_clone` と `CoW write` は `iter_batched` なので出力の drop が計測外で、`from` / `push` などの「drop 込み」ベンチと条件が揃っていない。
 - `reserve` の `additional = 8` は空の inline 文字列に対して確保が起きない (容量 16 に収まる) ので、`reserve` 呼び出しのオーバーヘッドしか測っていない。確保を伴うのは 64 だけ。
 - `push` / `insert` の `ch` ごとの比較は 1, 2, 3, 4 バイトを測っており十分。
 

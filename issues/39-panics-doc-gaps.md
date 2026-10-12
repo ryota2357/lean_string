@@ -32,7 +32,7 @@
 
 ## 原因
 
-メソッドを追加するたびに `# Panics` / `# Errors` を足す運用がなく、`From` / `Clone` / `Extend` などトレイト impl は doc コメントを持たないため落ちる。`truncate` のテキストは `remove` / `insert` の文面をそのまま流用したように見える (推測)。
+メソッドを追加するたびに `# Panics` / `# Errors` を足す運用がなく、`From` / `Clone` / `Extend` などトレイト impl は doc コメントを持たないため抜ける。`truncate` のテキストは `remove` / `insert` の文面をそのまま流用したように見える (推測)。
 
 ## 修正例
 

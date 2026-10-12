@@ -16,7 +16,7 @@
 
 ## 原因
 
-proptest は Miri では遅く、全部を走らせると CI が成り立たない。試したところ、`ProptestConfig { cases: 8, failure_persistence: None, .. }` にした 2 テスト (`replace_range` と `from_utf16le_lossy`) で、Miri x86_64 の実行に約 105 秒 (壁時計、ビルド済み) かかった。`String` の任意値の生成が長い文字列を作るため。
+proptest は Miri では遅く、全部を走らせると CI が成り立たない。試したところ、`ProptestConfig { cases: 8, failure_persistence: None, .. }` にした 2 テスト (`replace_range` と `from_utf16le_lossy`) で、Miri x86_64 の実行に 2 テスト合わせて約 105 秒 (壁時計、ビルド済み) かかった。`String` の任意値の生成が長い文字列を作るため。
 
 ## 修正例
 

@@ -14,7 +14,7 @@
 - 「The length of after extending / inserting / replacing is greater than ...」が 4 箇所 (`extend_from_within`, `insert`, `insert_str`, `replace_range` の `# Panics`)。「The length after ...」が自然。
 - `truncate` の「For 2, If you want to handle ...」の `If` が大文字。
 - `LeanString::from_utf16` / `from_utf16_lossy` と `LeanStr` の同名メソッドが「Decodes a slice of UTF-16 encoded **bytes**」と書くが、引数は `&[u16]` (bytes を取るのは `from_utf16le` / `from_utf16be`)。
-- `LeanStr::as_bytes` は「Returns a byte slice of the `LeanStr`'s contents.」、`LeanString::as_bytes` は「Returns a byte slice containing the entire `LeanString`.」と、同じ関数で文面が違う。
+- `LeanStr::as_bytes` は「Returns a byte slice of the `LeanStr`'s contents.」、`LeanString::as_bytes` は「Returns a byte slice containing the entire `LeanString`.」と、同じ関数なのに文面が違う。
 - `LeanString::capacity` が `# Note` 見出しを使う (rustdoc の慣例の節名ではない。std は本文に書く)。`remove` の例の見出し `## Past total length:` / `## Not on char boundary:` だけ末尾にコロンがあり、他の例の見出し (`## inline capacity` など) と不統一。
 - 非公開 doc: `src/repr/heap_buffer.rs` の `TextLen` の doc に `unsinged` が 2 箇所。
 

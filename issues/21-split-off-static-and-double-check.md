@@ -3,7 +3,7 @@
 - 種別: perf
 - 対象: `src/lib.rs` の `LeanString::try_split_off` (`split_off` も)
 - 影響: `from_static_str` で作った文字列を `split_off` すると、後半が 17 バイト以上なら heap 確保が起きる (確保しなくてよい)。
-  どのバッファでも、文字境界チェックが 2 回走り、その間に unwind 用の landing pad ができる。
+  どのバッファでも、文字境界チェックが 2 回走る。2 回目のチェックは `other` を作った後にあるので、panic に備えた unwind 用の landing pad もできる。
 - 優先度: 低
 
 ## 問題
@@ -25,7 +25,7 @@
 `5dd94ea`、rustc 1.97.0、LTO off の probe (`s.split_off(at)`) の x86-64 asm: 194 命令。`cmpb $-65, (...)` の
 境界チェックが 2 か所、`panic_fmt` (truncate の assert) と `_Unwind_Resume` を含む。
 
-確保回数とcachegrind の Ir (1 回あたり、65 バイトの文字列の clone を `split_off(10)`):
+確保回数と cachegrind の Ir (1 回あたり、65 バイトの文字列の clone を `split_off(10)`):
 
 | | 現状 | 下の修正例 |
 |---|---|---|

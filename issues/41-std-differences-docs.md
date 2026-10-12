@@ -47,7 +47,7 @@
 
 ## 原因
 
-README の "High API compatibility for `String`." だけで済ませ、差分を列挙する場所がない。`String::into_*` や `DerefMut` が無い理由
+README の "High API compatibility for `String`." だけで済ませ、差分を列挙する場所が無い。`String::into_*` や `DerefMut` が無い理由
 (レイアウトが共有・static を持つ) や、`From<String>` がコピーになる理由 (参照カウントのヘッダ) は実装の都合で、コード上にも書かれていない。
 `From<String>` / `From<Box<str>>` / `From<Cow<'_, str>>` の impl には doc が無い。
 

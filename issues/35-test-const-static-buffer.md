@@ -13,7 +13,7 @@ const 評価は Miri と同じエンジンで、ポインタのバイトを整�
 
 ## 修正例
 
-`tests/const.rs` に足すテスト。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した (const 評価はコンパイル時なので、各ターゲットでのコンパイルが通ることが本体)。
+以下のテストを `tests/const.rs` に足す。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した (const 評価はコンパイル時なので、各ターゲットでのコンパイルが通ることが本体)。
 
 ```rust
 const LONG: &str = "a static string longer than the inline limit";

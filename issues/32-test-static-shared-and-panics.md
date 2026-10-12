@@ -7,7 +7,7 @@
 
 ## 問題
 
-`5dd94ea` の `tests/` を確認した結果。
+`5dd94ea` の `tests/` を確認した結果は次のとおり。
 
 - `clear`: `tests/lean_string.rs` の `clear_cow` と doctest は inline / unique な heap / 共有の heap だけ。static バッファの分岐 (`as_static_buffer_mut().set_len(0)`、static のまま長さ 0 にする) は通らない。この分岐を `self.replace_inner(Repr::new())` に変えても (inline の空文字列になる) `alloc_string` / `lean_string` / `lean_str` / `conversion` / `const` / `out_of_memory` と doctest はすべて通ることを確認した。
 - `split_off`: `tests/alloc_string.rs` の 5 つのテストは unique な文字列だけ。static バッファ (`try_truncate` で static のまま縮む) と、共有された heap (64-bit では切り詰めがハンドルの長さだけを変え、相手は変わらない) の組み合わせが無い。
@@ -16,7 +16,7 @@
 
 ## 修正例
 
-足すテスト。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した。
+以下のテストを足す。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した。
 
 ```rust
 const INLINE_LIMIT: usize = size_of::<LeanString>();

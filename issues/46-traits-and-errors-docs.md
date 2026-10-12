@@ -12,7 +12,7 @@
 trait の doc は「A trait for converting a value to a `LeanString`.」の 1 行で、`# Examples` が無い (メソッドは `# Panics` / `# Errors` を持つ)。コードから分かるが書かれていないこと:
 
 - `T: Display` の blanket impl で、`ToString` の `LeanString` 版であること。`str` には別の impl があり (`"..".to_lean_string()` が `&str` に対して使える)、`&&str` のような参照は `Display` 経由になる。
-- `castaway` による型の特殊化で、整数 (`NonZero` 含む)、`f32` / `f64`、`bool`、`char`、`String`、`LeanString`、`LeanStr` は `Display` を経由せず直接作られる。`LeanString` / `LeanStr` に対しては clone (参照カウントの共有、`LeanStr` からは `try_into_lean_string` を経由するので場合によりコピー)。それ以外の型は `fmt::Write` で書き込む。`Box<str>` / `Cow<str>` / `&&str` などは特殊化されず `Display` 経由になる (推測: `castaway` は `'static` な型にしか一致しない)。
+- `castaway` による型の特殊化で、整数 (`NonZero` を含む)、`f32` / `f64`、`bool`、`char`、`String`、`LeanString`、`LeanStr` は `Display` を経由せず直接作られる。`LeanString` / `LeanStr` に対しては clone する (参照カウントの共有、`LeanStr` からは `try_into_lean_string` を経由するので場合によりコピー)。それ以外の型は `fmt::Write` で書き込む。`Box<str>` / `Cow<str>` / `&&str` などは特殊化されず `Display` 経由になる (推測: `castaway` は `'static` な型にしか一致しない)。
 - 失敗の意味: `ToLeanStringError::Reserve` (確保失敗・上限超過) と `Fmt` (`Display` 実装が `Err` を返した) の 2 種類。`to_lean_string()` が panic するのは両方。確認: `Display::fmt` が `Err(fmt::Error)` を返す型に対する `to_lean_string()` は `an error occurred when formatting an argument` で panic し、位置は `src/traits.rs` ([#38](./38-track-caller-missing.md) 参照)。
 - `fmt::Arguments` に対する特殊化が無い: `format_args!("<45 バイトのリテラル>").to_lean_string()` は確保 1 回 (static にならない) だが、`write!(string, "<同じリテラル>")` は 0 回 (`fmt::Write::write_fmt` が `Arguments::as_str()` で `from_static_str` を使う)。`std` の `ToString` は `Arguments` を特殊化している。この差は [#49](./49-format-macro.md) で扱う。
 
@@ -30,7 +30,7 @@ trait とエラー型は最初のリリースで最小の doc だけで作られ
 
 - trait の doc に、`ToString` との対応、特殊化される型 (確保なし・`Display` を経由しない) の一覧、`# Examples` (整数・`bool`・`char`・`Display` を実装した独自型)、`Fmt` エラーの意味を足す。`ToLeanStr` は `ToLeanString` へのリンクを張る。
 - `ReserveError` の docs に、返る条件 (確保失敗・長さ上限超過・`usize` オーバーフロー) と `LeanStr` の操作でも返ることを書く。
-- 破壊的変更を許す次のメジャー/マイナーのタイミングで、`ToLeanStringError` / `ToLeanStrError` を `#[non_exhaustive]` にするかを決める (`ReserveError` に原因を持たせるかも同時に判断する)。現状の 2 variant で足りるなら不要な、設計上の判断である。
+- 破壊的変更を許す次のメジャー/マイナーのタイミングで、`ToLeanStringError` / `ToLeanStrError` を `#[non_exhaustive]` にするかを決める (`ReserveError` に原因を持たせるかも同時に判断する)。現状の 2 variant で足りるなら不要であり、設計上の判断である。
 
 ## 確認方法
 

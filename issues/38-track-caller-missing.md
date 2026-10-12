@@ -42,7 +42,7 @@ std も全部が呼び出し元を指すわけではないが、`insert` / `inse
 
 ## 修正例
 
-`#[track_caller]` を次に付ける (検証済み。以下のスクリプトで機械的に付与した)。
+`#[track_caller]` を次に付ける (付与して効果を確認済み)。
 
 - `src/lib.rs`: docs に `# Panics` があるか、本体が `unwrap_with_msg` / `self.0.remove/insert*/truncate/replace_range/extend_from_within` / `[at..]` を呼ぶ `pub fn` 全部 (39 個)。`try_` 版も index の assert で panic するので付ける。
 - `src/repr.rs`: `remove`, `insert_str`, `insert_char`, `truncate`, `replace_range`, `extend_from_within`, `slice_range`。

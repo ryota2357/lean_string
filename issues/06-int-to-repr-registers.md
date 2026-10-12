@@ -194,7 +194,7 @@ if digits_count <= MAX_INLINE_SIZE {
 (criterion の中央値。2 回の測定で負荷が違うので、列をまたいだ比較はできない。コードが変わらない
 `u64::MAX` / `f64` の差が誤差の目安。この測定の `current` には [#17](./17-to-lean-string-codegen.md) の試作も
 入っている (効果は分離していない)。)
-32-bit 以下の型ではどちらの回でも 2〜6 割短くなっている。
+32-bit 以下の型ではどちらの回でも 2 割弱〜6 割短くなっている。
 
 テスト: `tests/property.rs` の整数のテスト、[#28](./28-int-boundary-tests.md) の境目のテスト、`tests/alloc_string.rs` が
 通った。Miri (`-Zmiri-strict-provenance`) で境目のテストと `tests/const.rs` / `tests/lean_string.rs` /

@@ -27,7 +27,7 @@
   `ptr::copy` で後ろへずらす。
 
 つまりどちらも常に O(n) で、「in place」(移動しない、あるいは O(1)) とは限らない。`String::into_boxed_str()` は容量と長さが同じなら
-何もしないので、"much like" の比較もこの点では当たらない。
+何もしないので、"much like" の比較もこの点では当てはまらない。
 
 さらに `into_lean_string` の変換後の容量は長さと同じ (`tests/conversion.rs` の `unique_heap_str_to_string` が
 `assert_eq!(lean_string.capacity(), text.len())` で確かめている) なので、変換直後の追加は必ずもう一度 realloc する。確保を数える

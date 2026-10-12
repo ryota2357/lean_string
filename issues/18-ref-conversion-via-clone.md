@@ -27,7 +27,7 @@ impl From<&LeanString> for LeanStr {
 ```
 
 `clone()` で参照カウントが 2 以上になるので、`Repr::into_immutable` / `Repr::into_mutable` は必ず「共有されている」分岐に入り、
-`Repr::from_str` で新しいバッファにコピーしてから `release` で参照カウントを戻す。確保は 1 回で正しいが、余計な処理が付く。
+`Repr::from_str` で新しいバッファにコピーしてから `release` で参照カウントを戻す。確保は 1 回で済んでいるが、余計な処理が付く。
 
 `5dd94ea`、rustc 1.97.0、x86-64、LTO なしの下流クレートで `fn(&LeanString) -> LeanStr { LeanStr::from(s) }` を見ると次のようになる。
 

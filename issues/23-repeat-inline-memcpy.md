@@ -3,7 +3,7 @@
 - 種別: perf
 - 対象: `src/repr.rs` の `Repr::repeat` (と `Repr::new_with` の inline 分岐)
 - 影響: `" ".repeat(indent)` のように、結果が 16 バイト (32-bit では 8 バイト) 以下になる `repeat`。
-  `LeanString::from` で同じ長さの文字列を作る場合の 5〜8 倍の命令数になる。優先度は低い。
+  `LeanString::from` で同じ長さの文字列を作る場合の約 4〜8 倍の命令数になる。優先度は低い。
 - 優先度: 低
 
 ## 問題
@@ -118,4 +118,4 @@ pub(crate) fn repeat(&self, n: usize) -> Result<Self, ReserveError> {
 
 - asm: `probe_repeat` の inline 分岐に `memcpy` の呼び出しとスタックへのストアが無いこと。
 - テスト: `repeat` の結果がちょうど 16 バイト (タグなし)、15 バイト、`n == 0` で `text` が heap / static、
-  `text` が空、を含む列挙テスト。Miri を big-endian でも (`to_le` / `from_le` の扱い)。
+  `text` が空、を含む列挙テスト。Miri を big-endian でも回す (`to_le` / `from_le` の扱い)。

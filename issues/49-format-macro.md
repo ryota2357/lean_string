@@ -17,7 +17,7 @@
 | `LeanString::from(format!("<リテラル> {x}"))` | 2 |
 | `LeanString::from_static_str("<同じリテラル>")` | 0 |
 
-リテラルだけの `Arguments` を `Arguments::as_str()` で見分けて `from_static_str` にする処理は、`fmt::Write::write_fmt` の impl と、`try_from_fmt` (`traits.rs`) の先頭にすでにある。`format_args!(..).to_lean_string()` が通らないのは、`impl<T: Display> ToLeanString for T` のフォールバックが `try_from_fmt(format_args!("{s}"))` と、`Arguments` を `{s}` で再ラップする (`as_str()` が `None` になる) ため。`castaway` は `'static` な型にしか一致しないので、`Arguments<'_>` を特殊化できない。
+リテラルだけの `Arguments` を `Arguments::as_str()` で見分けて `from_static_str` にする処理は、`fmt::Write::write_fmt` の impl と、`try_from_fmt` (`traits.rs`) の先頭にすでにある。`format_args!(..).to_lean_string()` で最適化が効かないのは、`impl<T: Display> ToLeanString for T` のフォールバックが `try_from_fmt(format_args!("{s}"))` を呼び、`Arguments` を `{s}` で再ラップする (`as_str()` が `None` になる) ため。`castaway` は `'static` な型にしか一致しないので、`Arguments<'_>` を特殊化できない。
 
 同種のクレートのマクロ (ローカルの registry のソースで確認): `compact_str::format_compact!`、`ecow::eco_format!`。
 

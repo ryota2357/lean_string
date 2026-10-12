@@ -3,7 +3,7 @@
 - 種別: perf
 - 対象: `src/repr/inline_buffer.rs` の `InlineBuffer::new` (`#[cfg(not(all(target_pointer_width = "64", target_endian = "little")))]` 版)
 - 影響: 32-bit ターゲット (i686、armv7、wasm32 など) と big-endian ターゲットで、inline に収まる文字列からの構築
-  (`LeanString::from(&str)`、`from_static_str`、`FromStr`、`into_lean_str` の inline 化など、`Repr::from_str` を通るものすべて)。
+  (`LeanString::from(&str)`、`from_static_str`、`FromStr`、短い heap 文字列を inline に移す `into_lean_str` や `reserve` / `shrink_to` の経路など、`InlineBuffer::new` を通るものすべて)。
 - 優先度: 低
 
 ## 問題
@@ -146,6 +146,6 @@ wasm32 / armv7 の asm は見ていない (ターゲット未導入)。wasm に�
 
 - `cargo rustc --release --lib --target i686-unknown-linux-gnu -- --emit asm` で `from_str` /
   `from_static_str` の inline 経路にスタックへのストアが無いこと。x86-64 の asm が変わらないこと。
-- Miri を CI の 4 ターゲット (特に powerpc64 / powerpc) で。長さ 0〜`MAX_INLINE_SIZE` の全長は
+- Miri を CI の 4 ターゲット (特に powerpc64 / powerpc) で回す。長さ 0〜`MAX_INLINE_SIZE` の全長は
   `tests/const.rs` の `from_every_inline_length_in_const` (const 評価) と `tests/lean_string.rs` の
   全長ループ (実行時) がすでに通しているので、これらが通ればよい。

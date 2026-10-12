@@ -31,7 +31,7 @@ pub fn try_to_uppercase(&self) -> Result<Self, ReserveError> {
 
 ### 4. `Extend<&LeanString>` / `Extend<&LeanStr>` / `FromIterator<&LeanString>` が無い
 
-`5dd94ea` で `vec_of_lean.iter()` を `extend` に渡すとコンパイルエラー (`LeanString: Extend<&LeanString>` が満たされない)。`String` も `Extend<&String>` / `FromIterator<&String>` を持たない (確認済み) ので std との互換性の問題ではなく、利便性の問題。回避は `.map(LeanString::as_str)`。
+`5dd94ea` で `vec_of_lean.iter()` を `extend` に渡すとコンパイルエラーになる (`LeanString: Extend<&LeanString>` が満たされない)。`String` も `Extend<&String>` / `FromIterator<&String>` を持たない (確認済み) ので std との互換性の問題ではなく、利便性の問題。回避は `.map(LeanString::as_str)`。
 
 ```rust
 impl<'a> Extend<&'a LeanString> for LeanString {
@@ -46,9 +46,9 @@ impl<'a> Extend<&'a LeanString> for LeanString {
 
 ### 5. 検討して見送ってよいもの
 
-- `leak` / `LeanStr::leak(self) -> &'static str`: heap の buffer なら `mem::forget(self)` で参照カウントを 1 つ残せば `&'static str` を返せる (sound) が、inline は値自体がバッファなので別に `Box::leak` でコピーが要り、static は元の `&'static str` を返せる。3 つの場合分けが要り、用途が限られる。需要が確認できるまで保留でよい。
+- `leak` / `LeanStr::leak(self) -> &'static str`: heap の buffer なら `mem::forget(self)` で参照カウントを 1 つ残せば `&'static str` を返せる (sound) が、inline は値自体がバッファなので別途 `Box::leak` でコピーが必要になり、static は元の `&'static str` を返せる。3 つの場合分けが要り、用途が限られる。需要が確認できるまで保留でよい。
 - `pop_if` (`String` にも安定版で存在しない)、`remove_matches` / `extract_if` (unstable) は対象外。
 
 ## 確認方法
 
-追加する場合、それぞれ `tests/lean_string.rs` / `tests/lean_str.rs` にテストを足す。`try_to_uppercase` は失敗アロケータで `Err` になり `self` が不変であること (`tests/out_of_memory.rs` の仕組み)。`INLINE_CAPACITY` は `assert_eq!(LeanString::new().capacity(), LeanString::INLINE_CAPACITY)` と 32-bit (`i686` の Miri) での値。
+追加する場合、それぞれ `tests/lean_string.rs` / `tests/lean_str.rs` にテストを足す。`try_to_uppercase` は失敗アロケータで `Err` になり `self` が不変であること (`tests/out_of_memory.rs` の仕組み)。`INLINE_CAPACITY` は `assert_eq!(LeanString::new().capacity(), LeanString::INLINE_CAPACITY)` と 32-bit (`i686` の Miri) での値で確認する。

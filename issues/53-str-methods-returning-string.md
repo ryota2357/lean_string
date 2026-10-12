@@ -2,7 +2,7 @@
 
 - 種別: api (設計判断を含む), doc
 - 対象: `src/lib.rs` の `LeanString` / `LeanStr`、`impl Deref<Target = str>`
-- 影響: 0.8.0 で `to_lowercase` / `to_uppercase` / `to_ascii_*` / `repeat` を `LeanString` / `LeanStr` を返すように直した (CHANGELOG の Breaking 項目) ときと同じ落とし穴が、同じ分類の他のメソッドに残っている。`lean.replace("a", "b")` は黙って `String` を返し、`LeanString` を期待する型へ戻すにはコピーが 1 回余計に要る。
+- 影響: 0.8.0 で `to_lowercase` / `to_uppercase` / `to_ascii_*` / `repeat` を `LeanString` / `LeanStr` を返すように直した (CHANGELOG の Breaking 項目) ときと同じ落とし穴が、同じ分類の他のメソッドに残っている。`lean.replace("a", "b")` は黙って `String` を返し、`LeanString` を期待する型へ戻すには余計なコピーが 1 回要る。
 - 優先度: 低
 
 ## 問題
@@ -31,7 +31,7 @@ impl<I, S> LeanStringExt for I where I: IntoIterator<Item = S>, S: AsRef<str> { 
 
 案 C: 何も足さず、docs に「`Deref` 経由の `str` メソッドで新しい文字列を作るものは `String` を返す。`LeanString` にするには `LeanString::from(..)` (コピー 1 回)」と書く ([#41](./41-std-differences-docs.md) に含める)。
 
-どれを採るかは `replace` の利用頻度次第で、設計判断。A は互換性に影響するので、利用者の `replace(char, ..)` 呼び出しが壊れないかを先に調べる必要がある (未調査)。
+どれを採るかは `replace` の利用頻度次第で、設計判断である。A は互換性に影響するので、利用者の `replace(char, ..)` 呼び出しが壊れないかを先に調べる必要がある (未調査)。
 
 ## 確認方法
 

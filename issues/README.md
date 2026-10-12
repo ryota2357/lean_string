@@ -145,7 +145,7 @@
 - `HeapBuffer::new`: 17〜31 バイトは 16 バイト×2、32〜64 バイトは 16 バイト×4 の固定長コピーになり、65 バイト以上だけ `memcpy` を呼ぶ。
 - `new_uninit` / `allocate_ptr` / `layout_for` / `Capacity::new` / `TextLen::new`: 64-bit では範囲チェックが `__rust_alloc` の前の 1 回の比較に畳まれる。
 - `from_char` / `from_bool` / `from_static_str` / `with_capacity` / `from_utf8`: レジスタだけで組み立てるか、必要な呼び出しだけになっている。
-- 32 bit 以下の整数の変換では heap の分岐がすでに消えている (LLVM が桁数の上限から導いている) ので、ヒントを足す必要は無い。
+- 64-bit では、32 bit 以下の整数の変換で heap の分岐がすでに消えている (LLVM が桁数の上限から導いている) ので、ヒントを足す必要は無い。
 - serde (`deserialize_str` + `visit_str` / `visit_borrowed_str`) と arbitrary (`&str` に委譲) に問題は無い。
 
 ### 追記・変更
@@ -180,7 +180,7 @@
 - `Repr::len` (64-bit) は分岐が無い (x86-64 は `cmov` 2 つ、aarch64 は `csel`)。`Repr::as_bytes` が x86-64 で分岐になるという NOTE も正しい。
   `hint::select_unpredictable` は分岐を消すが、まだ `const fn` で使えない。const でない版を試したが、速くなるとは言えなかった。
 - `Hash` は `str::hash` に委譲しており、`Borrow<str>` / `Eq` / `Ord` と整合している。リテラルとの比較 (`s == "hello"`) は `bcmp` を呼ばない。
-- 空の `LeanString` のデータポインタは自分自身を指すので、空の `String` 同士の比較で起きる glibc の遅い経路 ([#11](./11-short-eq-bcmp.md)) には入らない。
+- 空の `LeanString` のデータポインタはダングリングではなく値自身を指す。そのため `LeanString` 同士の比較は、空の `String` 同士の比較で起きる glibc の遅い経路 ([#11](./11-short-eq-bcmp.md)) に入らない。
 - 試して遅くなった案: inline 同士の `Ord` をワード比較にする案、正規形を前提にしないマスク付きの比較を `LeanString` に使う案
   ([#10](./10-leanstr-word-eq.md)、[#11](./11-short-eq-bcmp.md) に記録)。
 
@@ -206,5 +206,5 @@
 
 - `clone` / `to_lowercase` / `to_uppercase` / `eq` のベンチは、ループの外に追い出されていない。
 - `push_str/reserved` は `clear()` で容量を保つので、再確保ではなく追記を測れている。
-- コメントにあるコード生成の前提 (`len` が分岐なし、`push` / `insert` が `memcpy` を呼ばない、`from_char` がレジスタだけ、ASCII の走査がベクトル化される など) は、
+- コメントにあるコード生成の前提 (`len` が分岐なし、`push` / `insert` が `memcpy` を呼ばない、`from_char` がレジスタだけ、ASCII の走査がベクトル化されるなど) は、
   確かめられたものはすべて今も成り立つ ([#57](./57-codegen-claims-unchecked.md))。

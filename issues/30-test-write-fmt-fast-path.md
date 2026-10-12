@@ -23,7 +23,7 @@ if self.is_empty() && !self.is_heap_allocated() {
 
 ## 修正例
 
-`tests/lean_string.rs` に足すテスト。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した。
+以下のテストを `tests/lean_string.rs` に足す。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した。
 
 ```rust
 use std::fmt::Write as _;

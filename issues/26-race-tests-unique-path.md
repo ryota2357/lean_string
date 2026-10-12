@@ -55,7 +55,7 @@ assert_eq!(one.remove(0), 'a');
 ## 原因
 
 race テストが、相手スレッドの drop が `is_unique()` の判定より先に起きることを保証しておらず、相手スレッドが drop の前に共有バイトを
-読んでいない。オーバーフローは公開 API からは到達できないが、クレート内の単体テストも無い。
+読んでいない。オーバーフローは公開 API からは現実的に到達させられないが、クレート内の単体テストも無い。
 
 ## 修正例
 
@@ -196,7 +196,7 @@ mod refcount_tests {
 
 - `MIRIFLAGS="-Zmiri-strict-provenance -Zmiri-preemption-rate=1" cargo +nightly miri test --test race_condition` が 4 ターゲットで通ること。
 - `HeapBuffer::is_unique` の `Acquire` を一時的に `Relaxed` にしたときに、追加したテストが Miri で落ちることを一度確かめる
-  (`-Zmiri-many-seeds=0..16` を付けると確実)。CI は seed 1 つで回しているので、スケジュールへの依存を減らしたいなら CI の
+  (`-Zmiri-many-seeds=0..16` を付けると確実)。CI は seed 1 つで回しているので、実行順序への依存を減らしたいなら CI の
   "Test (race condition)" ステップに `-Zmiri-many-seeds=0..8` などを足す (ローカルでは 32 seed でも数秒だった)。
 - `ref_count_overflow` で panic の前に参照を戻す処理 (`replace_inner`) を消すと、単体テストの
   `assert_eq!(count.load(Relaxed), near_overflow)` が落ちること。

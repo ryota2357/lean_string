@@ -57,7 +57,7 @@ pub fn from_utf8_lossy(buf: &[u8]) -> Self {
 | ASCII 1000 バイト、900 バイト目だけ不正 | 8,005 | - | `String` 版: 7,906 |
 | 日本語 1000 文字 (3000 バイト) | 34,837 | - | `String` 版: 34,767 |
 
-どちらの測定でも、ASCII 1000 バイトで fast / `from_utf8` の約 8〜10 倍になる。`String::from_utf8_lossy` も
+ASCII 1000 バイトでは、先に `str::from_utf8` で検証する形 (測定 1 の fast、測定 2 の条件では下の修正例) の約 8〜10 倍になる。`String::from_utf8_lossy` も
 `utf8_chunks` を使うので std と同程度ではあるが、`LeanString::from_utf8` と比べると正しい入力に対して余計に払っている。
 
 同じバイナリの中で交互に時間も測った (`Instant`、負荷のある共有マシンなので参考値): ASCII 1000 バイトで
@@ -77,7 +77,7 @@ pub fn from_utf8_lossy(buf: &[u8]) -> Self {
 ## 原因
 
 1. `Utf8Chunks::next` (core の `core/src/str/lossy.rs`、nightly の rust-src で確認) は 1 バイトずつ先頭バイトを見て
-   文字の長さを判定するループで、`str::from_utf8` (`core::str::validations::run_utf8_validation`) にある
+   文字の長さを判定するループで、`str::from_utf8` (`core::str::validations::run_utf8_validation`) にあるような、
    ワード単位で ASCII を読み飛ばす処理が無い。ASCII の長い入力ほど差が開く (core のソースと命令数で確認)。
 2. 正しい入力でも `push_str` を経由するので、`from` のレジスタだけの inline 経路 (`InlineBuffer::new`) や
    長さで分けた固定長コピー (`HeapBuffer::new`) を使えない。

@@ -91,7 +91,7 @@ test_boundaries!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, usize, isize)
 
 `cargo test --test num_boundaries` (debug と `--release`)、および
 `MIRIFLAGS=-Zmiri-strict-provenance cargo +nightly miri test --target <t> --test num_boundaries` を
-CI の 4 ターゲットで。`num_to_repr.rs` を変更するときは、境目を 1 つずらす変異 (例: `DigitCount` の
+CI の 4 ターゲットで通ること。`num_to_repr.rs` を変更するときは、境目を 1 つずらす変異 (例: `DigitCount` の
 範囲の 1 つの桁数を変える) で落ちることを一度確かめる。
 
 ## 関連

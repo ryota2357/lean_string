@@ -64,7 +64,7 @@ aarch64 でも同じく `bl memmove` がループ内にある。一方 `String::
 試した結果: probe の asm からループ内の `memmove` 呼び出しが消え (残る呼び出しは `ensure_modifiable` と
 OOM 時の panic だけ)、上の表のとおり 34,617 → 16,912 Ir/回 (`String` より少ない)。
 既存のテスト (`tests/lean_string.rs`, `tests/alloc_string.rs`) と、`retain` を unique / 共有 / static の
-各バッファで `String` と突き合わせる property テストが通り、述語が途中で panic するテストを含めて
+各バッファで `String` と突き合わせる property テスト ([#31](./31-test-removal-ops-shared-static.md) のもの) が通り、述語が途中で panic するテストを含めて
 x86_64 の Miri (`-Zmiri-strict-provenance`) でも問題なし。
 
 ## 確認方法

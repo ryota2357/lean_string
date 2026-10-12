@@ -22,7 +22,7 @@ use std::borrow::BorrowMut; let _: &mut str = s.borrow_mut();
 
 ## 原因
 
-`DerefMut` / `AsMut` は引数が `&mut self` で fallible にできない。`LeanString` は heap buffer が共有されているか static のとき、`&mut str` を渡す前にコピー (CoW) を取らなければならず、その確保が失敗しうる (panic)。`Deref` の自動参照で暗黙に確保が走るのを避けるために入れていない、と読める (推測。コードにも docs にも理由は書かれていない)。
+`DerefMut` / `AsMut` は `&mut self` を受けて `&mut str` をそのまま返す形なので、fallible (`Result`) にできない。`LeanString` は heap buffer が共有されているか static のとき、`&mut str` を渡す前にコピー (CoW) を取らなければならず、その確保が失敗しうる (panic)。`Deref` の自動参照で暗黙に確保が走るのを避けるために入れていない、と読める (推測。コードにも docs にも理由は書かれていない)。
 
 ## 修正例
 

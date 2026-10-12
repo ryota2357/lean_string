@@ -16,7 +16,7 @@
 
 `FromUtf16Error` は 0.8.0 で `std` に合わせて不透明な構造体になり (`kind` は `pub(crate)`)、`LoneSurrogate` / `OddBytes` の 2 種類しか持たない。`Utf8Error` は `core` の型で、確保失敗を表せない。`Result` を返すのに OOM では panic する、という点自体が文書化されていない ([#39](./39-panics-doc-gaps.md) 参照)。
 
-回避策は存在する (`String::from_utf8_lossy` などで `&str` を作ってから `try_to_lean_string()` / `"..".parse::<LeanString>()`) が、その場合は一時的な `String` / `Cow` の確保が余計に入り、`utf8_chunks` を使った直接デコードの利点が失われる。
+回避策は存在する (`String::from_utf8_lossy` などで `&str` を作ってから `try_to_lean_string()` / `"..".parse::<LeanString>()`) が、その場合は一時的な `String` / `Cow` の確保が余計に発生し、`utf8_chunks` を使った直接デコードの利点が失われる。
 
 ## 原因
 
@@ -24,7 +24,7 @@
 
 ## 修正例
 
-lossy 系は `Result<Self, ReserveError>` を返すだけでよく、簡単。`try_from_utf8_lossy` を試作してテストを通した (`try_with_capacity` と `try_push_str` / `try_push` に置き換えるだけ):
+lossy 系は `Result<Self, ReserveError>` を返すだけでよく、簡単である。`try_from_utf8_lossy` を試作してテストを通した (`try_with_capacity` と `try_push_str` / `try_push` に置き換えるだけ):
 
 ```rust
 impl LeanString {

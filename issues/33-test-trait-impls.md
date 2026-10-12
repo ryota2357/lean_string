@@ -7,7 +7,7 @@
 
 ## 問題
 
-`5dd94ea` の `tests/` と doctest を grep した結果。
+`5dd94ea` の `tests/` と doctest を grep した結果は次のとおり。
 
 | impl | テスト |
 | --- | --- |
@@ -24,7 +24,7 @@
 
 ## 修正例
 
-`tests/lean_string.rs` (または新しいファイル) に足すテスト。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した。
+以下のテストを `tests/lean_string.rs` (または新しいファイル) に足す。x86_64 で `cargo test`、Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc64 / powerpc で通ることを確認した。
 
 ```rust
 use lean_string::{LeanStr, LeanString};

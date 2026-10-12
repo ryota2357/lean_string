@@ -7,7 +7,7 @@
 
 ## 問題
 
-32-bit では `TextLen` に入る長さが 2^24 - 2 まで (`MAX_LEN`) で、それを超えると長さはヘッダの前の prefix に置かれる。容量が `MAX_LEN` を超える growable バッファは prefix の場所を持つ。この切り替えに関係する分岐と、`5dd94ea` の 32-bit 向けテスト (`tests/lean_string.rs` / `tests/conversion.rs` の `MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT` を使うもの、`heap_buffer.rs` の単体テスト) の対応。
+32-bit では `TextLen` に入る長さが 2^24 - 2 まで (`MAX_LEN`) で、それを超えると長さはヘッダの前の prefix に置かれる。容量が `MAX_LEN` を超える growable バッファは prefix の場所を持つ。この切り替えに関係する分岐と、`5dd94ea` の 32-bit 向けテスト (`tests/lean_string.rs` / `tests/conversion.rs` の `MIN_CAPACITY_FOR_HEAP_LENGTH_LAYOUT_ON_32BIT` を使うもの、`heap_buffer.rs` の単体テスト) の対応は次の表のとおり。
 
 | 分岐 | 既存のテスト |
 | --- | --- |
@@ -21,7 +21,7 @@ i686 / powerpc では 16 MiB の文字列でも Miri が実用的な時間で走
 
 ## 修正例
 
-足すテスト。Miri (`-Zmiri-strict-provenance`) の i686 と powerpc で通ることを確認した (64-bit では `cfg` で外れる)。i686 のネイティブ実行は試していない。
+以下のテストを足す。Miri (`-Zmiri-strict-provenance`) の i686 と powerpc で通ることを確認した (64-bit では `cfg` で外れる)。i686 のネイティブ実行は試していない。
 
 ```rust
 #![cfg(target_pointer_width = "32")]

@@ -9,7 +9,7 @@
 
 `LeanString` の doc は「Compact, clone-on-write, UTF-8 encoded, growable string type.」の 1 文のみ。対して `LeanStr` は、サイズ、inline 記憶域、O(1) の clone、`LeanString` との表現の違いと相互変換のコスト、使い分けまでを段落で説明している。
 
-型のページで分からないが、コードで確認できる性質 (`5dd94ea`):
+型のページからは分からないが、コードで確認できる性質 (`5dd94ea`):
 
 1. 記憶域は inline (最大 `2 * size_of::<usize>()` = 16 / 8 バイト)、heap (参照カウント付き)、static (`&'static str` を指すだけ) の 3 種類。`capacity()` は inline で常に 16 (32-bit では 8)、static では `len()` と等しい。docs の例ごとに `2 * size_of::<usize>()` と書かれ (12 箇所)、`INLINE_CAPACITY` のような定数は無い ([#54](./54-small-additions.md) 参照)。
 2. 変更系メソッドが確保・複製するのは「heap で共有中」「static」のときで、inline では起きない。例えば `reserve(1)` は共有中のヒープ文字列で必ず 1 回確保する (カウント: 1)。静的文字列への `push` も 1 回確保する。`reserve(0)` / 空文字列の `push_str` / 何も除去しない `retain` などは共有・static のまま (確保 0)。この規則は個々のメソッドの docs に分散している。

@@ -162,7 +162,7 @@ ascii/16 は [#12](./12-ascii-case-inline-fast-path.md) の inline の高速経�
 なお変化の無い入力は今でも速い (ASCII 小文字 256 バイトの `to_lowercase`: `LeanString` 320 Ir・確保 0、`str` 465 Ir・確保 1)。
 修正例はこの経路 (`split_at_first_change` が `None`) を変えない。
 
-`str` の同名メソッドとの比較、全 Unicode スカラー値 `U+0000..U+3000` を 7 文字ずつ区切った入力、`Σ` を含む入力、
+`str` の同名メソッドとの比較、`U+0000..U+3000` のすべての Unicode スカラー値を 7 文字ずつ区切った入力、`Σ` を含む入力、
 伸びる (`İ`, `ŉ`, `ΐ`)・縮む (Kelvin `K`, `ﬀ`) 入力で `to_lowercase` / `to_uppercase` の結果が `str` と一致し、
 短い入力のテストは Miri (`-Zmiri-strict-provenance`) の x86_64 / i686 / powerpc で問題なし。
 
@@ -172,7 +172,7 @@ ascii/16 は [#12](./12-ascii-case-inline-fast-path.md) の inline の高速経�
   関数呼び出しのまま残るため (callgrind で確認)。`str` は非公開の `conversions::to_lower` を直接使っている。
 - ascii/256 は `str` の約 2 倍の Ir のまま。最初の変化の位置を探す走査、ASCII の長さを測る走査、変換の 3 パスになるため。
   `str` は確保してから 1 パスで変換する。ASCII の部分を `usize` 単位の SWAR で「判定しながら変換」する 1 パス版も試したが、
-  ascii/256 は 909 → 1,178 Ir と悪化した (LLVM がベクトル化した変換ループのほうが速い)。mixed/256 は 15,909 → 12,639 Ir と改善した。
+  ascii/256 は約 910 → 1,178 Ir と悪化した (LLVM がベクトル化した変換ループのほうが速い)。mixed/256 は 15,909 → 12,639 Ir と改善した。
 
 ## 確認方法
 
@@ -186,4 +186,4 @@ ascii/16 は [#12](./12-ascii-case-inline-fast-path.md) の inline の高速経�
 
 - 変換結果が 16 バイト以下に縮んだとき (Kelvin 記号 `U+212A` × 6 = 18 バイト → `"kkkkkk"` 6 バイト、トルコ語の `ı` の `to_uppercase` など)、
   `LeanString` の結果は heap (容量 18) のまま残る。上の修正の最後で `len <= MAX_INLINE_SIZE` なら inline に移せば揃う (まれなので優先度は低い)。
-- `LeanStr` の `to_lowercase` / `to_uppercase` は結果を `LeanString` で作ってから変換するため、heap の結果ごとに `realloc` と全体の `memmove` が入る。これは [#14](./14-lean-str-built-via-lean-string.md) で扱う。
+- `LeanStr` の `to_lowercase` / `to_uppercase` は結果を `LeanString` で作ってから `LeanStr` に変換するため、heap の結果ごとに `realloc` と全体の `memmove` が入る。これは [#14](./14-lean-str-built-via-lean-string.md) で扱う。

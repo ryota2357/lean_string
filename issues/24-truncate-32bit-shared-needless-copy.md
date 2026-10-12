@@ -80,10 +80,10 @@ unique なバッファの truncate のテストとあわせて、i686 の Miri �
 あわせて doc を直す。`LeanString::pop` の doc は「共有」かつ「長さが `2^24 - 2` を超える」ときにコピーすると書いているが、
 修正後は「pop した後の長さが `2^24 - 2` を超える」ときになる。`LeanString::truncate` の doc の
 「2. The system is out-of-memory when cloning the LeanString」は条件を書いていないので、`pop` と同じく
-「32-bit で、共有されていて、新しい長さが `2^24 - 2` を超えるときだけ」と書く (64-bit の `truncate` は確保しない)。`truncate` の doc がこの条件を書いていない点 (64-bit での OOM の条件が不正確なこと) は、[#39](./39-panics-doc-gaps.md) にも挙げている。
+「32-bit で、共有されていて、新しい長さが `2^24 - 2` を超えるときだけ」と書く (64-bit の `truncate` は確保しない)。今の `truncate` の doc が 64-bit では起こらない OOM を panic の条件に挙げている点は、[#39](./39-panics-doc-gaps.md) にも挙げている。
 
 ## 確認方法
 
 - 上のテストを `#[cfg(target_pointer_width = "32")]` で追加し、`assert_eq!(t.as_ptr(), s.as_ptr())` を確かめる。
   CI の i686 / powerpc の Miri で回る (16 MiB の文字列でも Miri で 1 秒未満だった)。
-- 共有のまま、新しい長さも heap 上になるケース (`BIG - 1`) でコピーされ、元が変わらないこと。
+- 共有のまま、新しい長さも heap 上になるケース (`BIG - 1`) でコピーされ、元が変わらないことを確かめる。

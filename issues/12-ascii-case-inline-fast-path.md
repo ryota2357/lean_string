@@ -77,7 +77,7 @@ pub(crate) fn swar_ascii_case(word: usize, case: Case) -> usize {
         }
 ```
 
-`to_lowercase` / `to_uppercase` は、inline で全バイトが ASCII なら上と同じ変換で済む (ASCII の Unicode の大文字・小文字変換は
+`to_lowercase` / `to_uppercase` は、inline で全バイトが ASCII なら上と同じ変換で済む (ASCII の文字に対する Unicode の大文字・小文字変換は
 ASCII の変換と一致する)。
 
 ```rust

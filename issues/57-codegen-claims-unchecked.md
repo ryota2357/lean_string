@@ -21,8 +21,8 @@
 | `HeapBuffer::new` | `16..=64` バイトは定数長 2 コピーで `memcpy` を避ける。`> 64` だけ `memcpy` |
 | `Capacity::new_unchecked` | `assert_unchecked` が `layout_for` のオーバーフロー・サイズ検査を畳む |
 | `InlineBuffer::new` (64bit LE) | 「Assemble entirely in registers」 |
-| `InlineBuffer::new` (その他) | 長さを半分ずつ定数長コピー、`memcpy` を避ける。`len == 16` を先に剥がして長さバイトの上書きを見せる |
-| `InlineBuffer::from_char` | 2 ワードをレジスタで組み立てる。`encode_utf8` + `Self::new` ではスタック往復 |
+| `InlineBuffer::new` (その他) | 長さを半分ずつ定数長でコピーし、`memcpy` を避ける。`len == 16` を先に剥がして長さバイトの上書きを見せる |
+| `InlineBuffer::from_char` | 2 ワードをレジスタで組み立てる。`encode_utf8` + `Self::new` ではスタック往復になる |
 | `all_bytes` | 合計して `CHUNK_SIZE` と比較する形がベクトル化される (LLVM issue 96395 の回避) |
 
 これらはどれも「コードを読んでも成否が分からない」類の主張で、`perf:` コミットの根拠でもある。しかし検査は人が `cargo asm` で見る以外に存在しない。CI (`.github/workflows/ci.yaml`) は fmt/clippy/MSRV/test/miri/loom だけで、`bench/` はルートの workspace に含まれず一度もビルドされない (ベンチ自体が壊れても検出されない)。
@@ -42,7 +42,7 @@
 | `from(&str)` (i686) | `memcpy` は 1 回のみ | - | 成立 |
 | `to_lowercase` | `pcmpgtb`, `pmovmskb` などを含み、チャンク処理がベクトル化されている | - | 成立 |
 
-`Repr::last_byte` / `Repr::is_modifiable` / `Capacity::new_unchecked` の主張 (ある式を足す・順序を変えると codegen が悪化する、という種類) は、単一の asm を見ても成否が分からないので個別には確認していない。これらは asm の差分 (B の命令数 A/B) でしか守れない。
+`Repr::last_byte` / `Repr::is_modifiable` / `Capacity::new_unchecked` の主張 (ある式を足す・順序を変えると codegen が悪化する、という種類) は、単一の asm を見ても成否が分からないので個別には確認していない。これらは変更前後の比較 (下の修正例 B の命令数による A/B など) でしか守れない。
 
 壊れたら検出できるかも確かめた。`write_char` の `match` を実行時長の `ptr::copy_nonoverlapping(src, dst, encoded.len())` に置き換えたコピーで probe を作り直すと、`probe_push` に `memcpy` 呼び出しが 1 つ現れ、後述のチェックが `memcpy=1/0` で失敗した (確認済み)。
 
